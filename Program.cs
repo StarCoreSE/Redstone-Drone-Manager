@@ -62,7 +62,7 @@ namespace IngameScript
         string abGroup = "Afterburners";
 
         // Diameter of the harm zone.
-        int zoneDiameter = 11500;
+        int zoneDiameter = 12000;
 
         // Toggles debug mode. Outputs performance, may increase performance cost
         bool debug = false;
@@ -334,14 +334,18 @@ namespace IngameScript
             // Squares zoneDiameter to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneDiameter *= zoneDiameter;
 
-            // Check for existing group config
-            if (Me.CustomData == "" || Me.CustomData.Length > 2) Me.CustomData = "1";
-            int.TryParse(Me.CustomData, out group);
-            if (group == -1)
+            if (!isController)
             {
-                isController = true; // IK this looks dumb. Goal is to make sure isController doesn't get accidentally set to false.
-                group = 0;
+                // Check for existing group config
+                if (Me.CustomData == "" || Me.CustomData.Length > 2) Me.CustomData = "1";
+                int.TryParse(Me.CustomData, out group);
+                if (group == -1)
+                {
+                    isController = true; // IK this looks dumb. Goal is to make sure isController doesn't get accidentally set to false.
+                    group = 0;
+                }
             }
+            else Me.CustomData = "-1";
 
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
@@ -409,7 +413,6 @@ namespace IngameScript
                     if (wAPI.HasCoreWeapon(b))
                     {
                         fixedGuns.Add(b, false);
-                        wAPI.ToggleWeaponFire(b, false, true);
                         return true;
                     }
                     return false;
@@ -565,7 +568,7 @@ namespace IngameScript
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
                 return;
-            d.RemoveAll();
+            //d.RemoveAll();
 
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "ACTIVE" : "INACTIVE")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
@@ -738,12 +741,12 @@ namespace IngameScript
                         #region CCRP
 
                         resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
-                        d.PrintHUD(resultPos.ToString());
+                        //d.PrintHUD(resultPos.ToString());
 
                         if (doCcrp && resultPos != new Vector3D())
                         {
                             outText += "Locked on target " + aiTarget.Name + "\n";
-                            foreach (var weapon in fixedGuns.Keys)
+                            foreach (var weapon in fixedGuns.Keys.ToList<IMyTerminalBlock>())
                             {
                                 // See variable name
                                 predictedTargetPos = (Vector3D)wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0);
@@ -754,11 +757,20 @@ namespace IngameScript
                                 // Normalized vector forward from weapon
                                 Vector3D b = weapon.WorldMatrix.Forward;
 
+                                //d.DrawGPS("Offset " + a.Dot(b), predictedTargetPos, Color.Red);
+                                //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+
                                 // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
-                                if (!fixedGuns[weapon] && a.Dot(b) > maxOffset && Math.Pow(wAPI.GetMaxWeaponRange(weapon, 0), 2) < distanceTarget)
+                                if (!fixedGuns[weapon] && a.Dot(b) > maxOffset && Math.Pow(wAPI.GetMaxWeaponRange(weapon, 0), 2) > distanceTarget)
+                                {
                                     wAPI.ToggleWeaponFire(weapon, true, true);
+                                    fixedGuns[weapon] = true;
+                                }
                                 else if (fixedGuns[weapon])
-                                    wAPI.ToggleWeaponFire(weapon, true, false);
+                                {
+                                    wAPI.ToggleWeaponFire(weapon, false, true);
+                                    fixedGuns[weapon] = false;
+                                }
                             }
 
                             resultPos = predictedTargetPos;
@@ -790,13 +802,13 @@ namespace IngameScript
                     //vThrust = Vector3D.Rotate(new Vector3D(TWRCalc(4) < TWRCalc(5) ? TWRCalc(4) : TWRCalc(5), TWRCalc(0) < TWRCalc(1) ? TWRCalc(0) : TWRCalc(1), TWRCalc(2) < TWRCalc(3) ? TWRCalc(2) : TWRCalc(3)), Me.CubeGrid.WorldMatrix);
 
                     Vector3D stopPosition = CalcStopPosition(movement*60, centerOfGrid);
-                    d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
-                    d.DrawGPS("Stop Position", stopPosition);
+                    //d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
+                    //d.DrawGPS("Stop Position", stopPosition);
 
                     // Autostop when near zone
                     if (stopPosition.LengthSquared() > zoneDiameter)
                     {
-                        d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
+                        //d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
                         ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
                     }
 
@@ -809,7 +821,7 @@ namespace IngameScript
                                 moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
 
                                 // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
-                                d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                                //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                                 closestCollision = CheckCollision(moveTo);
 
                                 if (closestCollision != new Vector3D())
@@ -852,9 +864,9 @@ namespace IngameScript
                                 // Check if controller is in the way. If so, avoid
                                 //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
 
-                                d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                                d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                                d.DrawGPS("Drone Position", moveTo);
+                                //d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                                //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                                //d.DrawGPS("Drone Position", moveTo);
 
                                 closestCollision = CheckCollision(moveTo);
 
@@ -1303,7 +1315,7 @@ namespace IngameScript
             }
             else
             {
-                IGC.SendBroadcastMessage(group.ToString(), message);
+                IGC.SendBroadcastMessage(group.ToString(), (T)message);
             }
         }
 
