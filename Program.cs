@@ -379,7 +379,6 @@ namespace IngameScript
                 shieldController = shieldControllers[0];
                 shieldController.GetActions(new List<ITerminalAction>(), b => { if (b.Id == "DS-C_ShieldFortify_Toggle") toggleFort = b; return true; });
 
-                // TODO: Check for closest enemy? I think it does that already
                 shieldModulator = shieldModulators[0];
                 if (autoIntegrity) autoIntegrity = shieldModulator != null;
                 shieldModulator.GetActions(new List<ITerminalAction>(), b => { if (b.Id == "DS-M_ModulateReInforceProt_Toggle") toggleIntegrity = b; return true; });
@@ -500,8 +499,7 @@ namespace IngameScript
             gridId = Me.CubeGrid.EntityId;
             frame = 0;
 
-
-            // TODO: Madar = 22, 23, 24 for voxel detection
+            // TODO: Add asteroid detection
 
             Echo("\nSuccessfully initialized - disregard above message.\n Initialized as a " + (isController ? "controller." : "drone."));
         }
