@@ -714,7 +714,7 @@ namespace IngameScript
                     if (frame % 2 == 0)
                     {
                         // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
-                        if ((mode == 0 || autoTarget) && frame % 60 == 0)
+                        if (!healController && (mode == 0 || autoTarget) && frame % 60 == 0)
                         {
                             long target = 0;
                             double dist2 = 0;
@@ -741,39 +741,68 @@ namespace IngameScript
                         #region CCRP
 
                         resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
-                        //d.PrintHUD(resultPos.ToString());
 
-                        if (doCcrp && resultPos != new Vector3D())
+                        if (doCcrp)
                         {
-                            outText += "Locked on target " + aiTarget.Name + "\n";
-                            foreach (var weapon in fixedGuns.Keys.ToList<IMyTerminalBlock>())
+                            if (healController)
                             {
-                                // See variable name
-                                predictedTargetPos = (Vector3D)wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0);
+                                outText += "Locked on controller\n";
 
-                                // Normalized vector from current position to target
-                                Vector3D a = Vector3D.Normalize(predictedTargetPos - weapon.GetPosition());
+                                bool isLinedUp = Vector3D.Normalize(controllerPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
 
-                                // Normalized vector forward from weapon
-                                Vector3D b = weapon.WorldMatrix.Forward;
-
-                                //d.DrawGPS("Offset " + a.Dot(b), predictedTargetPos, Color.Red);
-                                //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-
-                                // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
-                                if (!fixedGuns[weapon] && a.Dot(b) > maxOffset && Math.Pow(wAPI.GetMaxWeaponRange(weapon, 0), 2) > distanceTarget)
+                                foreach (var weapon in fixedGuns.Keys.ToList<IMyTerminalBlock>())
                                 {
-                                    wAPI.ToggleWeaponFire(weapon, true, true);
-                                    fixedGuns[weapon] = true;
-                                }
-                                else if (fixedGuns[weapon])
-                                {
-                                    wAPI.ToggleWeaponFire(weapon, false, true);
-                                    fixedGuns[weapon] = false;
+                                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+
+                                    if (isLinedUp)
+                                    {
+                                        if (!weapon.GetValueBool("WC_Shoot"))
+                                        {
+                                            wAPI.ToggleWeaponFire(weapon, true, true);
+                                            fixedGuns[weapon] = true;
+                                        }
+                                    }
+                                    else if (weapon.GetValueBool("WC_Shoot"))
+                                    {
+                                        wAPI.ToggleWeaponFire(weapon, false, true);
+                                        fixedGuns[weapon] = false;
+                                    }
                                 }
                             }
+                            else if (resultPos != new Vector3D())
+                            {
+                                outText += "Locked on target " + aiTarget.Name + "\n";
 
-                            resultPos = predictedTargetPos;
+                                Vector3D a = Vector3D.Normalize(predictedTargetPos - centerOfGrid);
+                                foreach (var weapon in fixedGuns.Keys.ToList<IMyTerminalBlock>())
+                                {
+                                    // See variable name
+                                    predictedTargetPos = (Vector3D)wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0);
+
+                                    // Normalized vector forward from weapon
+                                    Vector3D b = weapon.WorldMatrix.Forward;
+
+                                    //d.DrawGPS($"Offset {RoundPlaces(a.Dot(b), 4)}/{RoundPlaces(maxOffset, 4)}\n{(a.Dot(b) > maxOffset)}", predictedTargetPos, Color.Red);
+                                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+
+                                    // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
+                                    if (a.Dot(b) > maxOffset && Math.Pow(wAPI.GetMaxWeaponRange(weapon, 0), 2) > distanceTarget)
+                                    {
+                                        if (!weapon.GetValueBool("WC_Shoot"))
+                                        {
+                                            wAPI.ToggleWeaponFire(weapon, true, true);
+                                            fixedGuns[weapon] = true;
+                                        }
+                                    }
+                                    else
+                                        if (weapon.GetValueBool("WC_Shoot"))
+                                        {
+                                            ////d.PrintHUD("Toggled weapons OFF");
+                                            wAPI.ToggleWeaponFire(weapon, false, true);
+                                            fixedGuns[weapon] = false;
+                                        }
+                                }
+                            }
                         }
                         else
                         {
@@ -834,22 +863,14 @@ namespace IngameScript
 
                                 double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
 
-                                if (healController)
-                                {
+                                if (!healController && damageAmmo != "") {
+                                    //d.PrintHUD($"Damage ammo {damageAmmo}");
                                     foreach (var wep in fixedGuns.Keys)
-                                        if (wAPI.GetActiveAmmo(wep, 0) != healAmmo)
-                                            wAPI.SetActiveAmmo(wep, 0, healAmmo);
-                                        else
+                                    {
+                                        if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
                                             break;
-                                }
-
-                                else
-                                {
-                                    foreach (var wep in fixedGuns.Keys)
-                                        if (wAPI.GetActiveAmmo(wep, 0) != damageAmmo)
-                                            wAPI.SetActiveAmmo(wep, 0, damageAmmo);
-                                        else
-                                            break;
+                                        wep.SetValue<Int64>("WC_PickAmmo", 0);
+                                    }
                                 }
 
                                 if (dSq > formDistance * formDistance * 4 || healController)
@@ -1028,7 +1049,13 @@ namespace IngameScript
                     else
                     {
                         if (healAmmo != "") healController = true;
+                        else return;
                         wAPI.SetAiFocus(Me, controlID);
+                        //d.PrintHUD($"Healing ammo {healAmmo}");
+                        foreach (var wep in fixedGuns.Keys)
+                        {
+                            wep.SetValue<Int64>("WC_PickAmmo", 1);
+                        }
                     }
                     return;
                 case "learnheal":
@@ -1037,6 +1064,7 @@ namespace IngameScript
                         healAmmo = wAPI.GetActiveAmmo(w, 0);
                         if (damageAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
                     }
+                    Echo("Learned damage ammo " + healAmmo);
                     break;
                 case "learndamage":
                     foreach (var w in fixedGuns.Keys)
@@ -1044,6 +1072,7 @@ namespace IngameScript
                         damageAmmo = wAPI.GetActiveAmmo(w, 0);
                         if (healAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
                     }
+                    Echo("Learned damage ammo " + damageAmmo);
                     break;
                 case "ctrlgroup":
                     if (isController)
