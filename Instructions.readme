@@ -8,6 +8,8 @@ Commissioned by @First-Pass#8270
 
 Arguments are not case-sensitive. Settings below can be modified, but in case I forgot to minify it, please don't edit below where it says to
 
+!!RECOMPILE AFTER PASTING IN DRONE!!
+
 
 Construction guide:
    1. Have a programmable block
@@ -40,7 +42,7 @@ Arguments:
 	START      - Starts all drone groups
 	STOP       - Stops all drone groups
 	GROUP      - Switch selected group (0 = all)
-   CTRLGROUP   - Take control of selected group
+    CTRLGROUP   - Take control of selected group
 	FORM[int]  - Sets current drone group to specified formation preset
 		form0      - Wall formation [DEFAULT]
 		form1      - Sphere formation

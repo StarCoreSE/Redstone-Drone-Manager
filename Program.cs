@@ -746,17 +746,11 @@ namespace IngameScript
                                 foreach (var weapon in fixedGuns)
                                 {
                                     //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-                                    if (isLinedUp)
+                                    if (isLinedUp && wAPI.IsWeaponReadyToFire(weapon))
                                     {
-                                        outText += wAPI.GetHeatLevel(weapon).ToString();
                                         if (!weapon.GetValueBool("WC_Shoot"))
                                         {
-                                            //wAPI.ToggleWeaponFire(weapon, true, true);
                                             weapon.SetValueBool("WC_Shoot", true);
-                                        }
-                                        if (wAPI.GetHeatLevel(weapon) < 0.1f)
-                                        {
-                                            weapon.SetValueBool("WC_Shoot", false);
                                         }
                                     }
                                     else if (weapon.GetValueBool("WC_Shoot"))
