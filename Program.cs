@@ -65,7 +65,7 @@ namespace IngameScript
         int zoneDiameter = 12000;
 
         // Toggles debug mode. Outputs performance, may increase performance cost
-        bool debug = false;
+        bool debug = true;
 
 
 
@@ -173,7 +173,6 @@ namespace IngameScript
         IMyBroadcastListener orientListener;
         IMyBroadcastListener performanceListener;
         IMyBroadcastListener dronePosListener;
-        MyIGCMessage bufferMessage;
 
 
         int group = 1; // Supports groups 1 through 4.
@@ -284,7 +283,7 @@ namespace IngameScript
         List<IMyTerminalBlock> downAB = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> leftAB = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> rightAB = new List<IMyTerminalBlock>();
-        Dictionary<IMyTerminalBlock, bool> fixedGuns = new Dictionary<IMyTerminalBlock, bool>(); // Gun, gunIsFiring
+        List<IMyTerminalBlock> fixedGuns = new List<IMyTerminalBlock>();
         List<IMyThrust> allThrust = new List<IMyThrust>();
         IMyRadioAntenna antenna;
 
@@ -409,14 +408,7 @@ namespace IngameScript
             // Get fixed guns
             try
             {
-                GridTerminalSystem.GetBlockGroupWithName(gunGroup).GetBlocksOfType<IMyTerminalBlock>(null, b => {
-                    if (wAPI.HasCoreWeapon(b))
-                    {
-                        fixedGuns.Add(b, false);
-                        return true;
-                    }
-                    return false;
-                });
+                GridTerminalSystem.GetBlockGroupWithName(gunGroup).GetBlocksOfType<IMyTerminalBlock>(fixedGuns, b => wAPI.HasCoreWeapon(b));
             }
             catch
             {
@@ -428,7 +420,7 @@ namespace IngameScript
                 if (fixedGuns.Count > 0)
                 {
                     string[] splitCustomData = new string[2];
-                    IMyTerminalBlock b = fixedGuns.Keys.ToList<IMyTerminalBlock>()[0];
+                    IMyTerminalBlock b = fixedGuns[0];
                     if (b.CustomData != "")
                     {
                         splitCustomData = b.CustomData.Split('\n');
@@ -542,7 +534,7 @@ namespace IngameScript
             while (positionListener.HasPendingMessage)
             {
                 controllerPos = positionListener.AcceptMessage().As<Vector3D>();
-                if (!activated)
+                if (!activated && id != -1)
                 {
                     activated = true;
                     centerOfGrid = Me.CubeGrid.GetPosition();
@@ -711,6 +703,7 @@ namespace IngameScript
 
                 else // If on AND is drone
                 {
+                    outText += "Locked on target " + aiTarget.Name + "\n";
                     if (frame % 2 == 0)
                     {
                         // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
@@ -749,58 +742,54 @@ namespace IngameScript
                                 outText += "Locked on controller\n";
 
                                 bool isLinedUp = Vector3D.Normalize(controllerPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
-
-                                foreach (var weapon in fixedGuns.Keys.ToList<IMyTerminalBlock>())
+                                
+                                foreach (var weapon in fixedGuns)
                                 {
                                     //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-
                                     if (isLinedUp)
                                     {
+                                        outText += wAPI.GetHeatLevel(weapon).ToString();
                                         if (!weapon.GetValueBool("WC_Shoot"))
                                         {
-                                            wAPI.ToggleWeaponFire(weapon, true, true);
-                                            fixedGuns[weapon] = true;
+                                            //wAPI.ToggleWeaponFire(weapon, true, true);
+                                            weapon.SetValueBool("WC_Shoot", true);
+                                        }
+                                        if (wAPI.GetHeatLevel(weapon) < 0.1f)
+                                        {
+                                            weapon.SetValueBool("WC_Shoot", false);
                                         }
                                     }
                                     else if (weapon.GetValueBool("WC_Shoot"))
                                     {
-                                        wAPI.ToggleWeaponFire(weapon, false, true);
-                                        fixedGuns[weapon] = false;
+                                        //wAPI.ToggleWeaponFire(weapon, false, true);
+                                        weapon.SetValueBool("WC_Shoot", false);
                                     }
                                 }
                             }
                             else if (resultPos != new Vector3D())
                             {
-                                outText += "Locked on target " + aiTarget.Name + "\n";
-
-                                Vector3D a = Vector3D.Normalize(predictedTargetPos - centerOfGrid);
-                                foreach (var weapon in fixedGuns.Keys.ToList<IMyTerminalBlock>())
+                                foreach (var weapon in fixedGuns)
                                 {
                                     // See variable name
                                     predictedTargetPos = (Vector3D)wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0);
-
-                                    // Normalized vector forward from weapon
-                                    Vector3D b = weapon.WorldMatrix.Forward;
+                                    bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
 
                                     //d.DrawGPS($"Offset {RoundPlaces(a.Dot(b), 4)}/{RoundPlaces(maxOffset, 4)}\n{(a.Dot(b) > maxOffset)}", predictedTargetPos, Color.Red);
                                     //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
 
                                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
-                                    if (a.Dot(b) > maxOffset && Math.Pow(wAPI.GetMaxWeaponRange(weapon, 0), 2) > distanceTarget)
+                                    float r = wAPI.GetMaxWeaponRange(weapon, 0);
+                                    if (isLinedUp && r*r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon))
                                     {
                                         if (!weapon.GetValueBool("WC_Shoot"))
                                         {
-                                            wAPI.ToggleWeaponFire(weapon, true, true);
-                                            fixedGuns[weapon] = true;
+                                            weapon.SetValueBool("WC_Shoot", true);
                                         }
                                     }
-                                    else
-                                        if (weapon.GetValueBool("WC_Shoot"))
-                                        {
-                                            ////d.PrintHUD("Toggled weapons OFF");
-                                            wAPI.ToggleWeaponFire(weapon, false, true);
-                                            fixedGuns[weapon] = false;
-                                        }
+                                    else if (weapon.GetValueBool("WC_Shoot"))
+                                    {
+                                        weapon.SetValueBool("WC_Shoot", false);
+                                    }
                                 }
                             }
                         }
@@ -865,7 +854,7 @@ namespace IngameScript
 
                                 if (!healController && damageAmmo != "") {
                                     //d.PrintHUD($"Damage ammo {damageAmmo}");
-                                    foreach (var wep in fixedGuns.Keys)
+                                    foreach (var wep in fixedGuns)
                                     {
                                         if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
                                             break;
@@ -991,13 +980,14 @@ namespace IngameScript
                     healController = false;
                     if (isController)
                         SendGroupMsg<String>("main", false);
+                    antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "wing":
                     mode = 1;
                     healController = false;
                     if (isController)
                         SendGroupMsg<String>("wing", false);
-
+                    antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "fort":
                     mode = 2;
@@ -1008,13 +998,14 @@ namespace IngameScript
                         IGC.SendBroadcastMessage("pos", centerOfGrid);
                         IGC.SendBroadcastMessage("ori", (cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix));
                     }
+                    antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "start":
                     activated = true;
                     centerOfGrid = Me.CubeGrid.GetPosition();
                     if (isController)
                     {
-                        if (updateSource == UpdateType.Terminal)
+                        if (updateSource != UpdateType.IGC)
                         {
                             SendGroupMsg<String>("start", true);
                             IGC.SendBroadcastMessage("-1", "start");
@@ -1025,18 +1016,16 @@ namespace IngameScript
                     return;
                 case "group":
                     if (group < 4) group++; else group = 0;
+                    antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "stop":
                     activated = false;
                     SetThrust(-1f, allThrust, false);
                     gyros.Reset();
-                    if (isController)
+                    if (isController && updateSource != UpdateType.IGC)
                     {
-                        if (updateSource == UpdateType.Terminal)
-                        {
-                            SendGroupMsg<String>("stop", true);
-                            IGC.SendBroadcastMessage("-1", "stop");
-                        }
+                        SendGroupMsg<String>("stop", true);
+                        IGC.SendBroadcastMessage("-1", "stop");
                     }
                     return;
                 case "heal":
@@ -1052,14 +1041,14 @@ namespace IngameScript
                         else return;
                         wAPI.SetAiFocus(Me, controlID);
                         //d.PrintHUD($"Healing ammo {healAmmo}");
-                        foreach (var wep in fixedGuns.Keys)
+                        foreach (var wep in fixedGuns)
                         {
                             wep.SetValue<Int64>("WC_PickAmmo", 1);
                         }
                     }
                     return;
                 case "learnheal":
-                    foreach (var w in fixedGuns.Keys)
+                    foreach (var w in fixedGuns)
                     {
                         healAmmo = wAPI.GetActiveAmmo(w, 0);
                         if (damageAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
@@ -1067,7 +1056,7 @@ namespace IngameScript
                     Echo("Learned damage ammo " + healAmmo);
                     break;
                 case "learndamage":
-                    foreach (var w in fixedGuns.Keys)
+                    foreach (var w in fixedGuns)
                     {
                         damageAmmo = wAPI.GetActiveAmmo(w, 0);
                         if (healAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
@@ -1092,7 +1081,7 @@ namespace IngameScript
             }
             else lastControllerPing = DateTime.Now;
 
-            antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
+            
 
             /* Internal comms:
              *  I - Used to set drone ID.        | I(int ID)(long EntityID)
@@ -1106,7 +1095,8 @@ namespace IngameScript
             switch (argument[0])
             {
                 case 'i':
-                    if (!isController && long.Parse(argument.Substring(3)) == Me.CubeGrid.EntityId) id = int.Parse(argument.Substring(1, 2));
+                    if (!isController && long.Parse(argument.Substring(3)) == Me.CubeGrid.EntityId)
+                        id = int.Parse(argument.Substring(1, 2));
                     antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     break;
                 case 'e':
@@ -1118,6 +1108,7 @@ namespace IngameScript
                         {
                             SendGroupMsg<String>("i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + droneEntities[i], true); // Send message in format: i04EntityId
                         }
+                        antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     }
                     break;
                 case 'r':
