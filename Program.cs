@@ -142,7 +142,7 @@ namespace IngameScript
 
         PbApiWrapper dAPI;
         WcPbApi wAPI;
-        DebugAPI d;
+        //DebugAPI d;
 
         bool canRun = false; // is weaponcore activated?
         bool activated = false; // have I been told to move?
@@ -357,7 +357,7 @@ namespace IngameScript
             dAPI = new PbApiWrapper(Me);
 
             // Init Debug Draw API
-            d = new DebugAPI(this);
+            //d = new DebugAPI(this);
 
 
             // Init Whip's GPS Gyro Control
