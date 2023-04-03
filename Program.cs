@@ -43,6 +43,9 @@ namespace IngameScript
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [TRUE]
         bool rotate = true;
 
+        // Speed of rotation around parent grid. Higher = slower. Default [6]
+        float rotateDividend = 6;
+
         // Set this to the grid's mass (in KG) IF there is no controller (cockpit, remote control) on the grid.
         float mass = 1300000;
 
@@ -678,8 +681,10 @@ namespace IngameScript
                     {
                         MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
                         d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
-                        //m.SetDirectionVector(Base6Directions.Direction.Up, Vector3D.Rotate(m.Up, MatrixD.CreateFromAxisAngle(m.Forward, (frame % 360) / 57.2957795)));
-                        m *= Matrix.CreateFromAxisAngle(m.Forward, (frame/6 % 360) / 57.2957795f);
+
+                        if (rotate)
+                            m *= Matrix.CreateFromAxisAngle(m.Forward, (frame/rotateDividend % 360) / 57.2957795f);
+
                         if (multipleControllers)
                         {
                             if (group != 0)
@@ -833,6 +838,7 @@ namespace IngameScript
                     }
 
                     else
+                    {
                         switch (mode)
                         {
                             case 0: // Orbit Enemy
@@ -846,15 +852,14 @@ namespace IngameScript
 
                                 if (closestCollision != new Vector3D())
                                     moveTo += moveTo.Cross(closestCollision);
-
-                                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
                                 break;
 
                             case 1: // Orbit Controller
 
                                 double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
 
-                                if (!healController && damageAmmo != "") {
+                                if (!healController && damageAmmo != "")
+                                {
                                     d.PrintHUD($"Damage ammo {damageAmmo}");
                                     foreach (var wep in fixedGuns)
                                     {
@@ -884,9 +889,6 @@ namespace IngameScript
 
                                 if (closestCollision != new Vector3D())
                                     moveTo += moveTo.Cross(closestCollision);
-
-                                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
-
                                 break;
 
                             case 2: // Sit and Fortify
@@ -899,11 +901,11 @@ namespace IngameScript
 
                                 if (closestCollision != new Vector3D())
                                     moveTo += moveTo.Cross(closestCollision);
-
-                                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
-
                                 break;
                         }
+                        //ThrustControl((Vector3D.DistanceSquared(stopPosition, moveTo) > 2500 ? stopPosition : centerOfGrid) - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+                        ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+                    }
                 }
 
             }
@@ -999,8 +1001,6 @@ namespace IngameScript
                         SendGroupMsg<String>("fort", false);
                         IGC.SendBroadcastMessage("pos", centerOfGrid);
                         MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
-                        d.DrawLine(centerOfGrid, centerOfGrid + m.Up*100, Color.Blue, 0.1f);
-                        m.SetDirectionVector(Base6Directions.Direction.Up, Vector3D.Rotate(m.Up, MatrixD.CreateFromAxisAngle(m.Forward, (frame % 360) / 57.2957795)));
                         
                         IGC.SendBroadcastMessage("ori", m);
                     }
