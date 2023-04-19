@@ -274,7 +274,6 @@ namespace IngameScript
         double distanceTarget = 0;
         bool hasABs = false;
 
-        Vector3D movement = new Vector3D(); // Velocity
         double speed = 0;
         int id = -1; // Per-drone ID. Used for formation flight. Controller is always -1
 
@@ -584,7 +583,6 @@ namespace IngameScript
                 IGC.SendBroadcastMessage("dpos", Me.CubeGrid.WorldAABB);
 
                 // Calculate velocity, because keen is a dum dum
-                movement = centerOfGrid - Me.CubeGrid.GetPosition();
                 centerOfGrid = Me.CubeGrid.GetPosition();
 
                 aiTarget = wAPI.GetAiFocus(gridId).Value;
@@ -594,7 +592,7 @@ namespace IngameScript
 
                 if (frame % 60 == 0)
                 {
-                    speed = movement.Length() * 60;
+                    speed = Me.CubeGrid.Speed;
 
                     // Zone-avoidance system
 
@@ -824,9 +822,8 @@ namespace IngameScript
 
                     Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(resultPos - centerOfGrid) : ctrlMatrix.Forward;
                     Vector3D moveTo = new Vector3D();
-                    //vThrust = Vector3D.Rotate(new Vector3D(TWRCalc(4) < TWRCalc(5) ? TWRCalc(4) : TWRCalc(5), TWRCalc(0) < TWRCalc(1) ? TWRCalc(0) : TWRCalc(1), TWRCalc(2) < TWRCalc(3) ? TWRCalc(2) : TWRCalc(3)), Me.CubeGrid.WorldMatrix);
 
-                    Vector3D stopPosition = CalcStopPosition(movement*60, centerOfGrid);
+                    Vector3D stopPosition = CalcStopPosition(Me.CubeGrid.LinearVelocity*60, centerOfGrid);
                     d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
                     d.DrawGPS("Stop Position", stopPosition);
 
