@@ -53,7 +53,7 @@ namespace IngameScript
         bool doCcrp = true;
 
         // Maximum innacuracy of CCRP in degrees. A lower number = higher accuracy requirement. Default [1]
-        double maxOffset = 1;
+        double maxOffset = 10;
 
         // How far drones in formation should be from the controller.
         static int formDistance = 250;
@@ -273,6 +273,7 @@ namespace IngameScript
         Vector3D resultPos = new Vector3D();
         double distanceTarget = 0;
         bool hasABs = false;
+        Vector3D movement = new Vector3D(); // Velocity
 
         double speed = 0;
         int id = -1; // Per-drone ID. Used for formation flight. Controller is always -1
@@ -583,6 +584,7 @@ namespace IngameScript
                 IGC.SendBroadcastMessage("dpos", Me.CubeGrid.WorldAABB);
 
                 // Calculate velocity, because keen is a dum dum
+                movement = centerOfGrid - Me.CubeGrid.GetPosition();
                 centerOfGrid = Me.CubeGrid.GetPosition();
 
                 aiTarget = wAPI.GetAiFocus(gridId).Value;
@@ -592,7 +594,7 @@ namespace IngameScript
 
                 if (frame % 60 == 0)
                 {
-                    speed = Me.CubeGrid.Speed;
+                    speed = movement.Length() * 60;
 
                     // Zone-avoidance system
 
@@ -823,7 +825,7 @@ namespace IngameScript
                     Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(resultPos - centerOfGrid) : ctrlMatrix.Forward;
                     Vector3D moveTo = new Vector3D();
 
-                    Vector3D stopPosition = CalcStopPosition(Me.CubeGrid.LinearVelocity*60, centerOfGrid);
+                    Vector3D stopPosition = CalcStopPosition(movement*60, centerOfGrid);
                     d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
                     d.DrawGPS("Stop Position", stopPosition);
 
