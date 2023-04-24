@@ -486,7 +486,7 @@ namespace IngameScript
 
             try
             {
-                if (shieldController.CustomData == "1") toggleFort.Apply(shieldController);
+                if (autoFortify && shieldController.CustomData == "1") toggleFort.Apply(shieldController);
             }
             catch { }
 
@@ -610,12 +610,9 @@ namespace IngameScript
 
                     // Autofortify system
 
-                    // I'm a bad programmer.
-                    // Wait, I have something for that.
-                    try
+                    if (autoFortify && dAPI.GridHasShield(Me.CubeGrid))
                     {
-                        // I'm a good programmer.
-                        if (autoFortify && dAPI.GridHasShield(Me.CubeGrid))
+                        try
                         {
                             if (speed < 12 && !isFortified) // fuck you darkstar
                             {
@@ -630,13 +627,15 @@ namespace IngameScript
                                 isFortified = false;
                             }
                         }
+                            catch { }
                     }
-                    catch { }
+                    
 
                     // AutoIntegrity System
-                    try
+
+                    if (autoIntegrity && dAPI.GridHasShield(Me.CubeGrid) && !isController)
                     {
-                        if (autoIntegrity && dAPI.GridHasShield(Me.CubeGrid) && !isController)
+                        try
                         {
                             if (distanceTarget < 40000 && !isIntegrity) // fuck you darkstar (x2). distanceTarget = distance squared.
                             {
@@ -649,8 +648,9 @@ namespace IngameScript
                                 isIntegrity = false;
                             }
                         }
-                    }
-                    catch { }
+                        catch { }
+                     }
+                 
 
                     // Revengance status
                     if (!isController && !(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
