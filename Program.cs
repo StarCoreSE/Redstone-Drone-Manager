@@ -199,7 +199,7 @@ namespace IngameScript
         Vector3D[][] formationPresets = new Vector3D[][] {
                             new Vector3D[] // X
                             {
-                                // Max 16
+                                // Max 32
 
                                 // Ring 1
                                 new Vector3D(formDistance, 0, 0),
@@ -219,7 +219,27 @@ namespace IngameScript
                                 new Vector3D(1.5*cos45*formDistance, 1.5*cos45*formDistance, 0),
                                 new Vector3D(1.5*cos45*formDistance, -1.5*cos45*formDistance, 0),
                                 new Vector3D(-1.5*cos45*formDistance, 1.5*cos45*formDistance, 0),
-                                new Vector3D(-1.5*cos45*formDistance, -1.5*cos45*formDistance, 0)
+                                new Vector3D(-1.5*cos45*formDistance, -1.5*cos45*formDistance, 0),
+
+                                // Ring 3
+                                new Vector3D(3.0*formDistance, 0, 0),
+                                new Vector3D(-3.0*formDistance, 0, 0),
+                                new Vector3D(0, 3.0*formDistance, 0),
+                                new Vector3D(0, -3.0*formDistance, 0),
+                                new Vector3D(3.0*cos45*formDistance, 3.0*cos45*formDistance, 0),
+                                new Vector3D(3.0*cos45*formDistance, -3.0*cos45*formDistance, 0),
+                                new Vector3D(-3.0*cos45*formDistance, 3.0*cos45*formDistance, 0),
+                                new Vector3D(-3.0*cos45*formDistance, -3.0*cos45*formDistance, 0),
+
+                                // Ring 4
+                                new Vector3D(4.5*formDistance, 0, 0),
+                                new Vector3D(-4.5*formDistance, 0, 0),
+                                new Vector3D(0, 4.5*formDistance, 0),
+                                new Vector3D(0, -4.5*formDistance, 0),
+                                new Vector3D(4.5*cos45*formDistance, 4.5*cos45*formDistance, 0),
+                                new Vector3D(4.5*cos45*formDistance, -4.5*cos45*formDistance, 0),
+                                new Vector3D(-4.5*cos45*formDistance, 4.5*cos45*formDistance, 0),
+                                new Vector3D(-4.5*cos45*formDistance, -4.5*cos45*formDistance, 0)
                             },
                             new Vector3D[] // Sphere
                             {
