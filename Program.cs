@@ -523,25 +523,8 @@ namespace IngameScript
             Echo("\nSuccessfully initialized - disregard above message.\n Initialized as a " + (isController ? "controller." : "drone."));
         }
 
-
-        public void Main(string argument, UpdateType updateSource)
+        public void IGCHandler(UpdateType updateSource)
         {
-            try
-            {
-                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
-            }
-            catch { }
-
-            if (!canRun) // If unable to init WC api, do not run.
-            {
-                Echo("UNABLE TO RUN! Make sure Weaponcore is enabled.");
-                return;
-            }
-            else if (!isController || mode == 1 || true) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
-            {
-                Runtime.UpdateFrequency = activated ? UpdateFrequency.Update1 : UpdateFrequency.Update100;
-            }
-
             // If IGC message recieved
 
             while (myBroadcastListener.HasPendingMessage)
@@ -580,11 +563,206 @@ namespace IngameScript
                 MyIGCMessage m = dronePosListener.AcceptMessage();
                 dronePositions[m.Source] = m.As<BoundingBoxD>();
             }
+        }
+
+        public void AutoIntegrity()
+        {
+            // AutoIntegrity System
+
+            if (autoIntegrity && dAPI.GridHasShield(Me.CubeGrid) && !isController)
+            {
+                try
+                {
+                    if (distanceTarget < 40000 && !isIntegrity) // fuck you darkstar (x2). distanceTarget = distance squared.
+                    {
+                        toggleIntegrity.Apply(shieldModulator);
+                        isIntegrity = true; // "dead reckoning" system for autointegrity. Breaks if messed with. )))
+                    }
+                    else if (isIntegrity && distanceTarget > 40000)
+                    {
+                        toggleIntegrity.Apply(shieldModulator);
+                        isIntegrity = false;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        public void AutoFortify()
+        {
+            // Autofortify system
+
+            if (autoFortify && dAPI.GridHasShield(Me.CubeGrid))
+            {
+                try
+                {
+                    if (speed < 12 && !isFortified) // fuck you darkstar
+                    {
+                        shieldController.CustomData = "1";
+                        toggleFort.Apply(shieldController);
+                        isFortified = true; // "dead reckoning" system for autofortify. Breaks if messed with. )))
+                    }
+                    else if (isFortified && speed > 12)
+                    {
+                        shieldController.CustomData = "0";
+                        toggleFort.Apply(shieldController);
+                        isFortified = false;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        public void IGCSendHandler()
+        {
+            SendGroupMsg<Vector3D>(wAPI.GetAiFocus(gridId).Value.Position, false);
+            if (frame % 20 == 0)
+            {
+                SendGroupMsg<long>(wAPI.GetAiFocus(gridId).Value.EntityId, !multipleControllers || group == 0);
+
+                if (frame % 240 == 0)
+                {
+                    SendGroupMsg<String>("c" + Me.CubeGrid.EntityId, true);
+                }
+            }
+
+            if ((mode == 1) && frame % 2 == 0)
+            {
+                MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
+                d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
+
+                if (rotate)
+                    m *= Matrix.CreateFromAxisAngle(m.Forward, (frame / rotateDividend % 360) / 57.2957795f);
+
+                if (multipleControllers)
+                {
+                    if (group != 0)
+                    {
+                        IGC.SendBroadcastMessage("pos" + group, centerOfGrid);
+                        IGC.SendBroadcastMessage("vel" + group, cockpit.GetShipVelocities().LinearVelocity);
+
+                        IGC.SendBroadcastMessage("ori" + group, m);
+                    }
+                    else
+                    {
+                        for (int i = 1; i < 5; i++)
+                        {
+                            IGC.SendBroadcastMessage("pos" + i, centerOfGrid);
+                            IGC.SendBroadcastMessage("vel" + i, cockpit.GetShipVelocities().LinearVelocity);
+
+                            IGC.SendBroadcastMessage("ori" + i, m);
+                        }
+                    }
+                }
+                else
+                {
+                    // Transmit position and orientation every other tick
+                    IGC.SendBroadcastMessage("pos", centerOfGrid);
+                    IGC.SendBroadcastMessage("vel", cockpit.GetShipVelocities().LinearVelocity);
+                    IGC.SendBroadcastMessage("ori", m);
+                }
+            }
+        }
+
+        public long GetClosestTarget()
+        {
+            long target = 0;
+            Dictionary<MyDetectedEntityInfo, float> targets = new Dictionary<MyDetectedEntityInfo, float>();
+            wAPI.GetSortedThreats(Me, targets);
+
+            foreach (var targ in targets.Keys) // goofy ahh distance sorter
+            {
+                double dist2 = Vector3D.DistanceSquared(targ.Position, centerOfGrid);
+                if (dist2 < distanceTarget || distanceTarget == 0)
+                {
+                    distanceTarget = dist2;
+                    target = targ.EntityId;
+                }
+            }
+
+            return target;
+        }
+
+        public void CCRPHandler()
+        {
+            if (healController)
+            {
+                outText += "Locked on controller\n";
+
+                bool isLinedUp = Vector3D.Normalize(controllerPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
+
+                foreach (var weapon in fixedGuns)
+                {
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+                    if (isLinedUp && wAPI.IsWeaponReadyToFire(weapon))
+                    {
+                        if (!weapon.GetValueBool("WC_Shoot"))
+                        {
+                            weapon.SetValueBool("WC_Shoot", true);
+                        }
+                    }
+                    else if (weapon.GetValueBool("WC_Shoot"))
+                    {
+                        //wAPI.ToggleWeaponFire(weapon, false, true);
+                        weapon.SetValueBool("WC_Shoot", false);
+                    }
+                }
+            }
+            else if (resultPos != new Vector3D())
+            {
+                foreach (var weapon in fixedGuns)
+                {
+                    // See variable name
+                    Echo(aiTarget.EntityId.ToString());
+                    Echo(weapon.Name);
+
+                    predictedTargetPos = wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0).GetValueOrDefault();
+
+                    bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
+
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+
+                    // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
+                    float r = wAPI.GetMaxWeaponRange(weapon, 0);
+                    if (isLinedUp && r * r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon))
+                    {
+                        if (!weapon.GetValueBool("WC_Shoot"))
+                        {
+                            weapon.SetValueBool("WC_Shoot", true);
+                        }
+                    }
+                    else if (weapon.GetValueBool("WC_Shoot"))
+                    {
+                        weapon.SetValueBool("WC_Shoot", false);
+                    }
+                }
+            }
+        }
+
+        public void Main(string argument, UpdateType updateSource)
+        {
+            try
+            {
+                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
+            }
+            catch { }
+
+            if (!canRun) // If unable to init WC api, do not run.
+            {
+                Echo("UNABLE TO RUN! Make sure Weaponcore is enabled.");
+                return;
+            }
+            else if (!isController || mode == 1 || true) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
+            {
+                Runtime.UpdateFrequency = activated ? UpdateFrequency.Update1 : UpdateFrequency.Update100;
+            }
+
+            IGCHandler(updateSource);
 
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
                 return;
-            //d.RemoveAll();
+            d.RemoveAll();
 
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "ACTIVE" : "INACTIVE")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
@@ -614,61 +792,9 @@ namespace IngameScript
                 {
                     speed = movement.Length() * 60;
 
-                    // Zone-avoidance system
+                    AutoFortify();
 
-                    /* 
-                     * 0 forward
-                     * 1 back
-                     * 2 up
-                     * 3 down
-                     * 4 right
-                     * 5 left
-                     */
-
-
-                    // Autofortify system
-
-                    if (autoFortify && dAPI.GridHasShield(Me.CubeGrid))
-                    {
-                        try
-                        {
-                            if (speed < 12 && !isFortified) // fuck you darkstar
-                            {
-                                shieldController.CustomData = "1";
-                                toggleFort.Apply(shieldController);
-                                isFortified = true; // "dead reckoning" system for autofortify. Breaks if messed with. )))
-                            }
-                            else if (isFortified && speed > 12)
-                            {
-                                shieldController.CustomData = "0";
-                                toggleFort.Apply(shieldController);
-                                isFortified = false;
-                            }
-                        }
-                            catch { }
-                    }
-                    
-
-                    // AutoIntegrity System
-
-                    if (autoIntegrity && dAPI.GridHasShield(Me.CubeGrid) && !isController)
-                    {
-                        try
-                        {
-                            if (distanceTarget < 40000 && !isIntegrity) // fuck you darkstar (x2). distanceTarget = distance squared.
-                            {
-                                toggleIntegrity.Apply(shieldModulator);
-                                isIntegrity = true; // "dead reckoning" system for autointegrity. Breaks if messed with. )))
-                            }
-                            else if (isIntegrity && distanceTarget > 40000)
-                            {
-                                toggleIntegrity.Apply(shieldModulator);
-                                isIntegrity = false;
-                            }
-                        }
-                        catch { }
-                     }
-                 
+                    AutoIntegrity();
 
                     // Revengance status
                     if (!isController && !(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
@@ -684,53 +810,8 @@ namespace IngameScript
 
                 if (isController) // If on AND is controller
                 {
-                    SendGroupMsg<Vector3D>(wAPI.GetAiFocus(gridId).Value.Position, false);
-                    if (frame % 20 == 0)
-                    {
-                        SendGroupMsg<long>(wAPI.GetAiFocus(gridId).Value.EntityId, !multipleControllers || group == 0);
-
-                        if (frame % 240 == 0)
-                        {
-                            SendGroupMsg<String>("c" + Me.CubeGrid.EntityId, true);
-                        }
-                    }
-
-                    if ((mode == 1) && frame % 2 == 0)
-                    {
-                        MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
-                        //d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
-
-                        if (rotate)
-                            m *= Matrix.CreateFromAxisAngle(m.Forward, (frame/rotateDividend % 360) / 57.2957795f);
-
-                        if (multipleControllers)
-                        {
-                            if (group != 0)
-                            {
-                                IGC.SendBroadcastMessage("pos" + group, centerOfGrid);
-                                IGC.SendBroadcastMessage("vel" + group, cockpit.GetShipVelocities().LinearVelocity);
-
-                                IGC.SendBroadcastMessage("ori" + group, m);
-                            }
-                            else
-                            {
-                                for (int i = 1; i < 5; i++)
-                                {
-                                    IGC.SendBroadcastMessage("pos" + i, centerOfGrid);
-                                    IGC.SendBroadcastMessage("vel" + i, cockpit.GetShipVelocities().LinearVelocity);
-
-                                    IGC.SendBroadcastMessage("ori" + i, m);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Transmit position and orientation every other tick
-                            IGC.SendBroadcastMessage("pos", centerOfGrid);
-                            IGC.SendBroadcastMessage("vel", cockpit.GetShipVelocities().LinearVelocity);
-                            IGC.SendBroadcastMessage("ori", m);
-                        }
-                    }
+                    // Update drones with new instructions/positions
+                    IGCSendHandler();
                 }
 
                 else // If on AND is drone
@@ -740,101 +821,31 @@ namespace IngameScript
                     {
                         // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
                         if (!healController && (mode == 0 || autoTarget) && frame % 60 == 0)
-                        {
-                            long target = 0;
-                            Dictionary<MyDetectedEntityInfo, float> targets = new Dictionary<MyDetectedEntityInfo, float>();
-                            wAPI.GetSortedThreats(Me, targets);
-
-                            foreach (var targ in targets.Keys) // goofy ahh distance sorter
-                            {
-                                double dist2 = Vector3D.DistanceSquared(targ.Position, centerOfGrid);
-                                if (dist2 < distanceTarget || distanceTarget == 0)
-                                {
-                                    distanceTarget = dist2;
-                                    target = targ.EntityId;
-                                }
-                            }
-
-
-                            wAPI.SetAiFocus(Me, target);
-                        }
-
-
-
-                        #region CCRP
+                            wAPI.SetAiFocus(Me, GetClosestTarget());
 
                         resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
 
                         if (doCcrp)
-                        {
-                            if (healController)
-                            {
-                                outText += "Locked on controller\n";
-
-                                bool isLinedUp = Vector3D.Normalize(controllerPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
-                                
-                                foreach (var weapon in fixedGuns)
-                                {
-                                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-                                    if (isLinedUp && wAPI.IsWeaponReadyToFire(weapon))
-                                    {
-                                        if (!weapon.GetValueBool("WC_Shoot"))
-                                        {
-                                            weapon.SetValueBool("WC_Shoot", true);
-                                        }
-                                    }
-                                    else if (weapon.GetValueBool("WC_Shoot"))
-                                    {
-                                        //wAPI.ToggleWeaponFire(weapon, false, true);
-                                        weapon.SetValueBool("WC_Shoot", false);
-                                    }
-                                }
-                            }
-                            else if (resultPos != new Vector3D())
-                            {
-                                foreach (var weapon in fixedGuns)
-                                {
-                                    // See variable name
-                                    predictedTargetPos = (Vector3D)wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0);
-                                    bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
-
-                                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-
-                                    // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
-                                    float r = wAPI.GetMaxWeaponRange(weapon, 0);
-                                    if (isLinedUp && r*r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon))
-                                    {
-                                        if (!weapon.GetValueBool("WC_Shoot"))
-                                        {
-                                            weapon.SetValueBool("WC_Shoot", true);
-                                        }
-                                    }
-                                    else if (weapon.GetValueBool("WC_Shoot"))
-                                    {
-                                        weapon.SetValueBool("WC_Shoot", false);
-                                    }
-                                }
-                            }
-                        }
+                            CCRPHandler();
                         else
-                        {
                             outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
-                        }
-                        #endregion
+
 
                         bool needsRecalc = false;
                         // check if any thrusters are dead
                         foreach (var t in allThrust)
+                        {
                             if (t.WorldAABB == new BoundingBoxD())
                             {
                                 needsRecalc = true;
                                 break;
                             }
+                        }
                         if (needsRecalc)
                         {
                             GridTerminalSystem.GetBlocksOfType<IMyThrust>(allThrust);
                             RecalcThrust();
-                            Echo($"Recalculated thrust with {allThrust.Count} thrusters");
+                            outText += $"Recalculated thrust with {allThrust.Count} thrusters";
                         }
                     }
 
@@ -842,13 +853,13 @@ namespace IngameScript
                     Vector3D moveTo = new Vector3D();
 
                     Vector3D stopPosition = CalcStopPosition(movement*60, centerOfGrid);
-                    //d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
-                    //d.DrawGPS("Stop Position", stopPosition);
+                    d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
+                    d.DrawGPS("Stop Position", stopPosition);
 
                     // Autostop when near zone
                     if (stopPosition.LengthSquared() > zoneDiameter)
                     {
-                        //d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
+                        d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
                         ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
                     }
 
@@ -862,7 +873,7 @@ namespace IngameScript
                                 moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
 
                                 // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
-                                //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                                d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                                 closestCollision = CheckCollision(moveTo);
 
                                 if (closestCollision != new Vector3D())
@@ -875,7 +886,7 @@ namespace IngameScript
 
                                 if (!healController && damageAmmo != "")
                                 {
-                                    //d.PrintHUD($"Damage ammo {damageAmmo}");
+                                    d.PrintHUD($"Damage ammo {damageAmmo}");
                                     foreach (var wep in fixedGuns)
                                     {
                                         if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
@@ -896,9 +907,9 @@ namespace IngameScript
                                 // Check if controller is in the way. If so, avoid
                                 //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
 
-                                //d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                                //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                                //d.DrawGPS("Drone Position", moveTo);
+                                d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                                d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                                d.DrawGPS("Drone Position", moveTo);
 
                                 closestCollision = CheckCollision(moveTo);
 
@@ -1062,7 +1073,7 @@ namespace IngameScript
                         if (healAmmo != "") healController = true;
                         else return;
                         wAPI.SetAiFocus(Me, controlID);
-                        //d.PrintHUD($"Healing ammo {healAmmo}");
+                        d.PrintHUD($"Healing ammo {healAmmo}");
                         foreach (var wep in fixedGuns)
                         {
                             wep.SetValue<Int64>("WC_PickAmmo", 1);
