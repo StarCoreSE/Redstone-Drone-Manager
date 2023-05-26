@@ -47,6 +47,7 @@ Arguments:
 		form0      - Wall formation [DEFAULT]
 		form1      - Sphere formation
 		form2      - V formation
+		form3      - Following line formation
  
    LEARNHEAL  - Learns the heal-type ammunition for the guns on the drone. Saved between runs.
    LEARNDAMAGE- Learns the damage-type ammunition for the guns on the drone. Saved between runs.

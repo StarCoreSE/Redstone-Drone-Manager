@@ -25,6 +25,8 @@ namespace IngameScript
         #region mdk preserve
         /* CONFIG */
 
+        /* GENERAL SETTINGS */
+
         // If this PB is on a drone, set to 'false'. If this PB is on a ship, set to 'true'.
         bool isController = false;
 
@@ -41,10 +43,22 @@ namespace IngameScript
         bool autoTarget = false;
 
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [TRUE]
-        bool rotate = true;
+        bool rotate = false;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float rotateDividend = 6;
+
+        // How far drones in formation should be from the controller.
+        static int formDistance = 250;
+
+        // How far drones in 'main' mode should orbit from the target.
+        int mainDistance = 1000;
+
+        // Toggles debug mode. Outputs performance, may increase performance cost
+        bool debug = true;
+
+
+        /* DRONE SETTINGS */
 
         // Set this to the grid's mass (in KG) IF there is no controller (cockpit, remote control) on the grid.
         float mass = 1300000;
@@ -55,12 +69,6 @@ namespace IngameScript
         // Maximum innacuracy of CCRP in degrees. A lower number = higher accuracy requirement. Default [1]
         double maxOffset = 2;
 
-        // How far drones in formation should be from the controller.
-        static int formDistance = 250;
-
-        // How far drones in 'main' mode should orbit from the target.
-        int mainDistance = 1000;
-
         // Name of the terminal group containing the drone's fixed guns.
         string gunGroup = "Main";
 
@@ -70,8 +78,6 @@ namespace IngameScript
         // Diameter of the harm zone.
         int zoneDiameter = 12000;
 
-        // Toggles debug mode. Outputs performance, may increase performance cost
-        bool debug = true;
 
         // PID values
         #region PID values
@@ -270,6 +276,17 @@ namespace IngameScript
                                 new Vector3D(0, formDistance, 0),
                                 new Vector3D(0, -formDistance, 0),
                             },
+                            new Vector3D[] // duckling formation
+                            {
+                                new Vector3D(0, 0, formDistance),
+                                new Vector3D(0, 0, 2*formDistance),
+                                new Vector3D(0, 0, 3*formDistance),
+                                new Vector3D(0, 0, 4*formDistance),
+                                new Vector3D(0, 0, 5*formDistance),
+                                new Vector3D(0, 0, 6*formDistance),
+                                new Vector3D(0, 0, 7*formDistance),
+                                new Vector3D(0, 0, 2*formDistance),
+                            },
         };
 
         string damageAmmo = "";
@@ -345,7 +362,7 @@ namespace IngameScript
             }
             catch
             {
-                Echo("!!! If you can see this, you're probably missing something important (i.e. antenna) !!!");
+                Echo("[color=#FFFF0000]!!! If you can see this, you're probably missing something important (i.e. antenna) !!![/color]");
             }
 
             if (isController)
@@ -412,7 +429,7 @@ namespace IngameScript
             }
             catch
             {
-                Echo("No shield controller!");
+                Echo("[color=#FFFF0000]No shield controller![/color]");
             }
 
             // Autosets mass if ship controller detected
@@ -451,7 +468,7 @@ namespace IngameScript
                         healAmmo = splitCustomData[0];
                         damageAmmo = splitCustomData[1];
 
-                        Echo($"Set ammo types to:\n    HEAL - {healAmmo}\n    DAMAGE - {damageAmmo}");
+                        Echo($"[color=#FFFFFF00]Set ammo types to:\n    HEAL - {healAmmo}\n    DAMAGE - {damageAmmo}[/color]");
                     }
                 }
             }
@@ -464,7 +481,7 @@ namespace IngameScript
             }
             catch
             {
-                Echo("No afterburners detected!");
+                Echo("[color=#FFFFAA00]No afterburners detected![/color]");
             }
 
             // Sort afterburners
@@ -520,7 +537,7 @@ namespace IngameScript
 
             // TODO: Add asteroid detection
 
-            Echo("\nSuccessfully initialized - disregard above message.\n Initialized as a " + (isController ? "controller." : "drone."));
+            Echo("[color=#FF00FF00]\nSuccessfully initialized - disregard above message.\n Initialized as a [/color]" + (isController ? "controller." : "drone."));
         }
 
         public void IGCHandler(UpdateType updateSource)
@@ -530,9 +547,10 @@ namespace IngameScript
             while (myBroadcastListener.HasPendingMessage)
             {
                 MyIGCMessage message = myBroadcastListener.AcceptMessage();
-                if (message.GetType() == typeof(long) && !isController)
+
+                if (message.Data.GetType() == typeof(long) && !isController)
                     controlID = message.As<long>();
-                else if (message.GetType() == typeof(Vector3D))
+                else if (message.Data.GetType() == typeof(Vector3D))
                     ctrlTargetPos = message.As<Vector3D>();
                 else
                     ParseCommands(message.Data.ToString(), updateSource);
@@ -616,6 +634,8 @@ namespace IngameScript
         public void IGCSendHandler()
         {
             SendGroupMsg<Vector3D>(wAPI.GetAiFocus(gridId).Value.Position, false);
+            d.PrintHUD(wAPI.GetAiFocus(gridId).Value.Position.ToString());
+
             if (frame % 20 == 0)
             {
                 SendGroupMsg<long>(wAPI.GetAiFocus(gridId).Value.EntityId, !multipleControllers || group == 0);
@@ -713,10 +733,14 @@ namespace IngameScript
                 foreach (var weapon in fixedGuns)
                 {
                     // See variable name
-                    Echo(aiTarget.EntityId.ToString());
-                    Echo(weapon.Name);
-
-                    predictedTargetPos = wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0).GetValueOrDefault();
+                    try
+                    {
+                        predictedTargetPos = wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0).Value;
+                    }
+                    catch
+                    {
+                        continue;
+                    }
 
                     bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
 
@@ -749,7 +773,7 @@ namespace IngameScript
 
             if (!canRun) // If unable to init WC api, do not run.
             {
-                Echo("UNABLE TO RUN! Make sure Weaponcore is enabled.");
+                Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
                 return;
             }
             else if (!isController || mode == 1 || true) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
@@ -761,11 +785,14 @@ namespace IngameScript
 
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
+            {
+                lastControllerPing = DateTime.Now;
                 return;
+            }
             d.RemoveAll();
 
             // Status info
-            outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "ACTIVE" : "INACTIVE")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+            outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
 
             if (id == -1 && !isController) // If ID unset and is not controller, ping controller for ID.
             {
@@ -1086,7 +1113,7 @@ namespace IngameScript
                         healAmmo = wAPI.GetActiveAmmo(w, 0);
                         if (damageAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
                     }
-                    Echo("Learned damage ammo " + healAmmo);
+                    Echo("[color=#FF00FF00]Learned damage ammo [/color]" + healAmmo);
                     break;
                 case "learndamage":
                     foreach (var w in fixedGuns)
@@ -1094,7 +1121,7 @@ namespace IngameScript
                         damageAmmo = wAPI.GetActiveAmmo(w, 0);
                         if (healAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
                     }
-                    Echo("Learned damage ammo " + damageAmmo);
+                    Echo("[color=#FF00FF00]Learned damage ammo [/color]" + damageAmmo);
                     break;
                 case "ctrlgroup":
                     if (isController)
@@ -1112,8 +1139,6 @@ namespace IngameScript
                     SendGroupMsg<String>("f" + formation.ToString(), false);
                 }
             }
-            else lastControllerPing = DateTime.Now;
-
             
 
             /* Internal comms:
