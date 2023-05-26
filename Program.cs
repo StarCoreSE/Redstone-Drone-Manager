@@ -53,7 +53,7 @@ namespace IngameScript
         bool doCcrp = true;
 
         // Maximum innacuracy of CCRP in degrees. A lower number = higher accuracy requirement. Default [1]
-        double maxOffset = 10;
+        double maxOffset = 2;
 
         // How far drones in formation should be from the controller.
         static int formDistance = 250;
@@ -156,13 +156,14 @@ namespace IngameScript
 
         PbApiWrapper dAPI;
         WcPbApi wAPI;
-        //DebugAPI d;
+        DebugAPI d;
 
         bool canRun = false; // is weaponcore activated?
         bool activated = false; // have I been told to move?
 
         Vector3D centerOfGrid = new Vector3D(); // Me.position
         IMyCockpit cockpit;
+        List<IMyTerminalBlock> detectors = new List<IMyTerminalBlock>();
 
         long frame = 0;
 
@@ -380,7 +381,7 @@ namespace IngameScript
             dAPI = new PbApiWrapper(Me);
 
             // Init Debug Draw API
-            //d = new DebugAPI(this);
+            d = new DebugAPI(this);
 
 
             // Init Whip's GPS Gyro Control
@@ -1789,6 +1790,7 @@ namespace IngameScript
                     ModDetected = true;
                 }
             }
+            
 
             void Assign<T>(out T field, object method) => field = (T)method;
         }
