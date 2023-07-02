@@ -540,8 +540,9 @@ namespace IngameScript
             Echo("[color=#FF00FF00]\nSuccessfully initialized - disregard above message.\n Initialized as a [/color]" + (isController ? "controller." : "drone."));
         }
 
-        public void IGCHandler(UpdateType updateSource)
+        public bool IGCHandler(UpdateType updateSource)
         {
+            bool wasMessageRecieved = false;
             // If IGC message recieved
 
             while (myBroadcastListener.HasPendingMessage)
@@ -549,11 +550,13 @@ namespace IngameScript
                 MyIGCMessage message = myBroadcastListener.AcceptMessage();
 
                 if (message.Data.GetType() == typeof(long) && !isController)
-                    controlID = message.As<long>();
+                    wAPI.SetAiFocus(Me, message.As<long>());
                 else if (message.Data.GetType() == typeof(Vector3D))
                     ctrlTargetPos = message.As<Vector3D>();
                 else
                     ParseCommands(message.Data.ToString(), updateSource);
+
+                wasMessageRecieved = true;
             }
 
             while (positionListener.HasPendingMessage)
@@ -564,23 +567,38 @@ namespace IngameScript
                     activated = true;
                     centerOfGrid = Me.CubeGrid.GetPosition();
                 }
+                wasMessageRecieved = true;
             }
 
             if (mode == 1)
+            {
                 while (velocityListener.HasPendingMessage)
+                {
                     anchorVelocity = velocityListener.AcceptMessage().As<Vector3D>();
+                    wasMessageRecieved = true;
+                }
+            }
 
             while (orientListener.HasPendingMessage)
+            {
                 ctrlMatrix = orientListener.AcceptMessage().As<MatrixD>();
+                wasMessageRecieved = true;
+            }
 
             while (performanceListener.HasPendingMessage)
+            {
                 totalRuntime += performanceListener.AcceptMessage().As<double>();
+                wasMessageRecieved = true;
+            }
 
             while (dronePosListener.HasPendingMessage)
             {
                 MyIGCMessage m = dronePosListener.AcceptMessage();
                 dronePositions[m.Source] = m.As<BoundingBoxD>();
+                wasMessageRecieved = true;
             }
+
+            return wasMessageRecieved;
         }
 
         public void AutoIntegrity()
@@ -727,7 +745,7 @@ namespace IngameScript
                     }
                 }
             }
-            else if (resultPos != new Vector3D())
+            else if (!resultPos.IsZero())
             {
                 foreach (var weapon in fixedGuns)
                 {
@@ -741,9 +759,15 @@ namespace IngameScript
                         continue;
                     }
 
-                    bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
+                    LineD weaponRay = new LineD(Me.CubeGrid.GetPosition(), Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid);
 
+                    //bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
+                    aiTarget.BoundingBox.Translate(predictedTargetPos);
+                    bool isLinedUp = aiTarget.BoundingBox.Intersects(ref weaponRay);
+
+                    d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
                     d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+                    d.DrawAABB(aiTarget.BoundingBox, Color.Red);
 
                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
                     float r = wAPI.GetMaxWeaponRange(weapon, 0);
@@ -764,6 +788,11 @@ namespace IngameScript
 
         public void Main(string argument, UpdateType updateSource)
         {
+            // Prevents running multiple times per tick
+            if (updateSource == UpdateType.IGC)
+                return;
+
+            d.RemoveAll();
             if (!canRun) // If unable to init WC api, do not run.
             {
                 Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
@@ -777,16 +806,9 @@ namespace IngameScript
             {
                 Runtime.UpdateFrequency = activated ? UpdateFrequency.Update1 : UpdateFrequency.Update100;
             }
-
-            IGCHandler(updateSource);
-
-            // Prevents running multiple times per tick
-            if (updateSource == UpdateType.IGC)
-            {
+           
+            if (IGCHandler(updateSource))
                 lastControllerPing = DateTime.Now.Ticks;
-                return;
-            }
-            d.RemoveAll();
 
             try
             {
@@ -849,6 +871,9 @@ namespace IngameScript
                 else // If on AND is drone
                 {
                     outText += "Locked on target " + aiTarget.Name + "\n";
+                    d.DrawGPS("NOT gaming...", resultPos);
+
+                    // TODO fix
                     if (frame % 2 == 0)
                     {
                         // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
@@ -862,26 +887,28 @@ namespace IngameScript
                         else
                             outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
 
-
-                        bool needsRecalc = false;
-                        // check if any thrusters are dead
-                        foreach (var t in allThrust)
+                        if (frame % 60 == 0)
                         {
-                            if (t.WorldAABB == new BoundingBoxD())
+                            bool needsRecalc = false;
+                            // check if any thrusters are dead
+                            foreach (var t in allThrust)
                             {
-                                needsRecalc = true;
-                                break;
+                                if (t.WorldAABB == new BoundingBoxD())
+                                {
+                                    needsRecalc = true;
+                                    break;
+                                }
                             }
-                        }
-                        if (needsRecalc)
-                        {
-                            GridTerminalSystem.GetBlocksOfType(allThrust);
-                            RecalcThrust();
-                            outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                            if (needsRecalc)
+                            {
+                                GridTerminalSystem.GetBlocksOfType(allThrust);
+                                RecalcThrust();
+                                outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                            }
                         }
                     }
 
-                    Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(resultPos - centerOfGrid) : ctrlMatrix.Forward;
+                    Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(predictedTargetPos - centerOfGrid) : ctrlMatrix.Forward;
                     Vector3D moveTo = new Vector3D();
 
                     Vector3D stopPosition = CalcStopPosition(movement*60, centerOfGrid);
@@ -1132,7 +1159,7 @@ namespace IngameScript
                 case "ctrlgroup":
                     if (isController)
                     {
-                        SendGroupMsg<String>("c" + Me.CubeGrid.EntityId, false);
+                        SendGroupMsg<string>("c" + Me.CubeGrid.EntityId, false);
                     }
                     break;
             }
@@ -1197,13 +1224,14 @@ namespace IngameScript
                     int.TryParse(argument.Substring(1), out formation);
                     if (formation + 1 > formationPresets.Length) formation = formationPresets.Length - 1;
                     break;
-                default:
-                    long targetID;
-                    if (mode != 0 && !autoTarget && long.TryParse(argument, out targetID))
-                    {
-                        wAPI.SetAiFocus(Me, targetID);
-                    }
-                    break;
+                //default:
+                //    long targetID;
+                //    if (mode != 0 && !autoTarget && long.TryParse(argument, out targetID))
+                //    {
+                //        d.PrintChat("Set target to " + targetID);
+                //        wAPI.SetAiFocus(Me, targetID);
+                //    }
+                //    break;
             }
         }
 
