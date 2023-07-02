@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.32413.511
+# Visual Studio Version 17
+VisualStudioVersion = 17.6.33815.320
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Rocketman Drone Manager", "Rocketman Drone Manager.csproj", "{DA8344AE-2849-4CEC-B3C5-51CC895A991B}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "AristeasUtils", "..\AristeasUtils\AristeasUtils.shproj", "{BF8FCFBD-2FC4-4007-BDEC-2EA83A4E1366}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,5 +20,9 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {2FD801A6-DB3F-4880-B7FA-C3D101EBED04}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\AristeasUtils\AristeasUtils.projitems*{bf8fcfbd-2fc4-4007-bdec-2ea83a4e1366}*SharedItemsImports = 13
+		..\AristeasUtils\AristeasUtils.projitems*{da8344ae-2849-4cec-b3c5-51cc895a991b}*SharedItemsImports = 4
 	EndGlobalSection
 EndGlobal

@@ -195,7 +195,7 @@ namespace IngameScript
         #region drone-specific
 
         long controlID = 0;
-        DateTime lastControllerPing = DateTime.Now;
+        long lastControllerPing = 0;
 
         static readonly double cos45 = Math.Sqrt(2) / 2;
 
@@ -360,9 +360,10 @@ namespace IngameScript
             {
                 Init();
             }
-            catch
+            catch (Exception e)
             {
                 Echo("[color=#FFFF0000]!!! If you can see this, you're probably missing something important (i.e. antenna) !!![/color]");
+                Echo(e.Message);
             }
 
             if (isController)
@@ -371,6 +372,19 @@ namespace IngameScript
 
         public void Init()
         {
+            Runtime.UpdateFrequency = UpdateFrequency.Update100;
+
+            // Init Weaponcore API
+            wAPI = new WcPbApi();
+            canRun = wAPI.Activate(Me);
+            if (!canRun) return;
+
+            // Init Defense Shields API
+            dAPI = new PbApiWrapper(Me);
+
+            // Init Debug Draw API
+            d = new DebugAPI(this);
+
             // Squares zoneDiameter to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneDiameter *= zoneDiameter;
 
@@ -386,20 +400,6 @@ namespace IngameScript
                 }
             }
             else Me.CustomData = "-1";
-
-            Runtime.UpdateFrequency = UpdateFrequency.Update100;
-
-            // Init Weaponcore API
-            wAPI = new WcPbApi();
-            canRun = wAPI.Activate(Me);
-            if (!canRun) return;
-
-            // Init Defense Shields API
-            dAPI = new PbApiWrapper(Me);
-
-            // Init Debug Draw API
-            d = new DebugAPI(this);
-
 
             // Init Whip's GPS Gyro Control
             gridSystem = GridTerminalSystem;
@@ -634,7 +634,6 @@ namespace IngameScript
         public void IGCSendHandler()
         {
             SendGroupMsg<Vector3D>(wAPI.GetAiFocus(gridId).Value.Position, false);
-            d.PrintHUD(wAPI.GetAiFocus(gridId).Value.Position.ToString());
 
             if (frame % 20 == 0)
             {
@@ -765,15 +764,13 @@ namespace IngameScript
 
         public void Main(string argument, UpdateType updateSource)
         {
-            try
-            {
-                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
-            }
-            catch { }
-
             if (!canRun) // If unable to init WC api, do not run.
             {
                 Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
+
+                frame++;
+                if (frame >= 10)
+                    Init();
                 return;
             }
             else if (!isController || mode == 1 || true) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
@@ -786,13 +783,21 @@ namespace IngameScript
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
             {
-                lastControllerPing = DateTime.Now;
+                lastControllerPing = DateTime.Now.Ticks;
                 return;
             }
             d.RemoveAll();
 
+            try
+            {
+                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
+            }
+            catch { }
+
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+            if (!isController)
+                d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
 
             if (id == -1 && !isController) // If ID unset and is not controller, ping controller for ID.
             {
@@ -826,7 +831,7 @@ namespace IngameScript
                     // Revengance status
                     if (!isController && !(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
                     {
-                        if (DateTime.Now.Subtract(lastControllerPing) > TimeSpan.FromSeconds(10)) // If hasn't recieved message within 10 seconds
+                        if (DateTime.Now.Ticks - lastControllerPing > 100000000) // If hasn't recieved message within 10 seconds
                         {
                             mode = 0;          // Go into freeflight mode
                             autoTarget = true; // Automatically attack the nearest enemy
@@ -870,7 +875,7 @@ namespace IngameScript
                         }
                         if (needsRecalc)
                         {
-                            GridTerminalSystem.GetBlocksOfType<IMyThrust>(allThrust);
+                            GridTerminalSystem.GetBlocksOfType(allThrust);
                             RecalcThrust();
                             outText += $"Recalculated thrust with {allThrust.Count} thrusters";
                         }
@@ -948,7 +953,7 @@ namespace IngameScript
 
                                 gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
 
-                                moveTo = (controllerPos + formationPresets[formation][id]);
+                                moveTo = controllerPos + formationPresets[formation][id];
 
                                 closestCollision = CheckCollision(moveTo);
 
@@ -1062,6 +1067,7 @@ namespace IngameScript
                 case "start":
                     activated = true;
                     centerOfGrid = Me.CubeGrid.GetPosition();
+                    lastControllerPing = DateTime.Now.Ticks;
                     if (isController)
                     {
                         if (updateSource != UpdateType.IGC)
@@ -1071,7 +1077,7 @@ namespace IngameScript
                         }
                         IGC.SendBroadcastMessage("pos", centerOfGrid);
 
-                        IGC.SendBroadcastMessage("ori", (cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix));
+                        IGC.SendBroadcastMessage("ori", cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix);
                     }
                     return;
                 case "group":
@@ -1380,7 +1386,7 @@ namespace IngameScript
         }
         public double TWRCalc(int dir)
         {
-            return (thrustAmt[dir]) / mass;
+            return thrustAmt[dir] / mass;
         }
         public void SendGroupMsg<T>(Object message, bool sendAll) // Shorthand so I don't have to type out like 50 chars every time I do an IGC call
         {
@@ -1418,279 +1424,12 @@ namespace IngameScript
         }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         #region Whip's Gyro Control
-
-        public class VectorPID
-        {
-            private PID X;
-            private PID Y;
-            private PID Z;
-
-            public VectorPID(double kP, double kI, double kD, double lowerBound, double upperBound, double timeStep)
-            {
-                X = new PID(kP, kI, kD, lowerBound, upperBound, timeStep);
-                Y = new PID(kP, kI, kD, lowerBound, upperBound, timeStep);
-                Z = new PID(kP, kI, kD, lowerBound, upperBound, timeStep);
-            }
-
-            public VectorPID(double kP, double kI, double kD, double integralDecayRatio, double timeStep)
-            {
-                X = new PID(kP, kI, kD, integralDecayRatio, timeStep);
-                Y = new PID(kP, kI, kD, integralDecayRatio, timeStep);
-                Z = new PID(kP, kI, kD, integralDecayRatio, timeStep);
-            }
-
-            public Vector3D Control(Vector3D error)
-            {
-                return new Vector3D(X.Control(error.X), Y.Control(error.Y), Z.Control(error.Z));
-            }
-
-            public void Reset()
-            {
-                X.Reset();
-                Y.Reset();
-                Z.Reset();
-            }
-        }
-
-        public class GyroControl
-        {
-            private List<IMyGyro> gyros;
-            IMyTerminalBlock rc;
-
-            public GyroControl(IMyTerminalBlock rc, double kP, double kI, double kD, double lowerBound, double upperBound, double timeStep)
-            {
-                this.rc = rc;
-
-                gyros = GetBlocks<IMyGyro>();
-
-                anglePID = new VectorPID(kP, kI, kD, lowerBound, upperBound, timeStep);
-
-                Reset();
-            }
-            // In (pitch, yaw, roll)
-            VectorPID anglePID;
-
-            public void Reset()
-            {
-                for (int i = 0; i < gyros.Count; i++)
-                {
-                    IMyGyro g = gyros[i];
-                    if (g == null)
-                    {
-                        gyros.RemoveAtFast(i);
-                        continue;
-                    }
-                    g.GyroOverride = false;
-                }
-                anglePID.Reset();
-            }
-
-
-            Vector3D GetAngles(MatrixD current, Vector3D forward, Vector3D up)
-            {
-                Vector3D error = new Vector3D();
-                if (forward != Vector3D.Zero)
-                {
-                    Quaternion quat = Quaternion.CreateFromForwardUp(current.Forward, current.Up);
-                    Quaternion invQuat = Quaternion.Inverse(quat);
-                    Vector3D RCReferenceFrameVector = Vector3D.Transform(forward, invQuat); //Target Vector In Terms Of RC Block
-
-                    //Convert To Local Azimuth And Elevation
-                    Vector3D.GetAzimuthAndElevation(RCReferenceFrameVector, out error.Y, out error.X);
-                }
-
-                if (up != Vector3D.Zero)
-                {
-                    Vector3D temp = Vector3D.Normalize(VectorRejection(up, rc.WorldMatrix.Forward));
-                    double dot = MathHelper.Clamp(Vector3D.Dot(rc.WorldMatrix.Up, temp), -1, 1);
-                    double rollAngle = Math.Acos(dot);
-                    double scaler = ScalerProjection(temp, rc.WorldMatrix.Right);
-                    if (scaler > 0)
-                        rollAngle *= -1;
-                    error.Z = rollAngle;
-                }
-
-                if (Math.Abs(error.X) < 0.001)
-                    error.X = 0;
-                if (Math.Abs(error.Y) < 0.001)
-                    error.Y = 0;
-                if (Math.Abs(error.Z) < 0.001)
-                    error.Z = 0;
-
-                return error;
-            }
-
-            public void FaceVectors(Vector3D forward, Vector3D up)
-            {
-                // In (pitch, yaw, roll)
-                Vector3D error = -GetAngles(rc.WorldMatrix, forward, up);
-                Vector3D angles = new Vector3D(anglePID.Control(error));
-                ApplyGyroOverride(rc.WorldMatrix, angles);
-            }
-            void ApplyGyroOverride(MatrixD current, Vector3D localAngles)
-            {
-                Vector3D worldAngles = Vector3D.TransformNormal(localAngles, current);
-                foreach (IMyGyro gyro in gyros)
-                {
-                    Vector3D transVect = Vector3D.TransformNormal(worldAngles, MatrixD.Transpose(gyro.WorldMatrix));  //Converts To Gyro Local
-                    if (!transVect.IsValid())
-                        throw new Exception("Invalid trans vector. " + transVect.ToString());
-
-                    gyro.Pitch = (float)transVect.X;
-                    gyro.Yaw = (float)transVect.Y;
-                    gyro.Roll = (float)transVect.Z;
-                    gyro.GyroOverride = true;
-                }
-            }
-
-            /// <summary>
-            /// Projects a value onto another vector.
-            /// </summary>
-            /// <param name="guide">Must be of length 1.</param>
-            public static double ScalerProjection(Vector3D value, Vector3D guide)
-            {
-                double returnValue = Vector3D.Dot(value, guide);
-                if (double.IsNaN(returnValue))
-                    return 0;
-                return returnValue;
-            }
-
-            /// <summary>
-            /// Projects a value onto another vector.
-            /// </summary>
-            /// <param name="guide">Must be of length 1.</param>
-            public static Vector3D VectorPojection(Vector3D value, Vector3D guide)
-            {
-                return ScalerProjection(value, guide) * guide;
-            }
-
-            /// <summary>
-            /// Projects a value onto another vector.
-            /// </summary>
-            /// <param name="guide">Must be of length 1.</param>
-            public static Vector3D VectorRejection(Vector3D value, Vector3D guide)
-            {
-                return value - VectorPojection(value, guide);
-            }
-        }
-
-        //Whip's PID controller class v6 - 11/22/17
-        public class PID
-        {
-            double _kP = 0;
-            double _kI = 0;
-            double _kD = 0;
-            double _integralDecayRatio = 0;
-            double _lowerBound = 0;
-            double _upperBound = 0;
-            double _timeStep = 0;
-            double _inverseTimeStep = 0;
-            double _errorSum = 0;
-            double _lastError = 0;
-            bool _firstRun = true;
-            bool _integralDecay = false;
-            public double Value
-            {
-                get; private set;
-            }
-
-            public PID(double kP, double kI, double kD, double lowerBound, double upperBound, double timeStep)
-            {
-                _kP = kP;
-                _kI = kI;
-                _kD = kD;
-                _lowerBound = lowerBound;
-                _upperBound = upperBound;
-                _timeStep = timeStep;
-                _inverseTimeStep = 1 / _timeStep;
-                _integralDecay = false;
-            }
-
-            public PID(double kP, double kI, double kD, double integralDecayRatio, double timeStep)
-            {
-                _kP = kP;
-                _kI = kI;
-                _kD = kD;
-                _timeStep = timeStep;
-                _inverseTimeStep = 1 / _timeStep;
-                _integralDecayRatio = integralDecayRatio;
-                _integralDecay = true;
-            }
-
-            public double Control(double error)
-            {
-                //Compute derivative term
-                var errorDerivative = (error - _lastError) * _inverseTimeStep;
-
-                if (_firstRun)
-                {
-                    errorDerivative = 0;
-                    _firstRun = false;
-                }
-
-                //Compute integral term
-                if (!_integralDecay)
-                {
-                    _errorSum += error * _timeStep;
-
-                    //Clamp integral term
-                    if (_errorSum > _upperBound)
-                        _errorSum = _upperBound;
-                    else if (_errorSum < _lowerBound)
-                        _errorSum = _lowerBound;
-                }
-                else
-                {
-                    _errorSum = _errorSum * (1.0 - _integralDecayRatio) + error * _timeStep;
-                }
-
-                //Store this error as last error
-                _lastError = error;
-
-                //Construct output
-                this.Value = _kP * error + _kI * _errorSum + _kD * errorDerivative;
-                return this.Value;
-            }
-
-            public double Control(double error, double timeStep)
-            {
-                _timeStep = timeStep;
-                _inverseTimeStep = 1 / _timeStep;
-                return Control(error);
-            }
-
-            public void Reset()
-            {
-                _errorSum = 0;
-                _lastError = 0;
-                _firstRun = true;
-            }
-        }
 
         static IMyGridTerminalSystem gridSystem;
         static long gridId;
 
-        static T GetBlock<T>(string name, bool useSubgrids = false) where T : class, IMyTerminalBlock
+        public static T GetBlock<T>(string name, bool useSubgrids = false) where T : class, IMyTerminalBlock
         {
             if (useSubgrids)
             {
@@ -1707,12 +1446,12 @@ namespace IngameScript
                 return null;
             }
         }
-        static T GetBlock<T>(bool useSubgrids = false) where T : class, IMyTerminalBlock
+        public static T GetBlock<T>(bool useSubgrids = false) where T : class, IMyTerminalBlock
         {
             List<T> blocks = GetBlocks<T>(useSubgrids);
             return blocks.FirstOrDefault();
         }
-        static List<T> GetBlocks<T>(string groupName, bool useSubgrids = false) where T : class, IMyTerminalBlock
+        public static List<T> GetBlocks<T>(string groupName, bool useSubgrids = false) where T : class, IMyTerminalBlock
         {
             if (string.IsNullOrWhiteSpace(groupName))
                 return GetBlocks<T>(useSubgrids);
@@ -1725,110 +1464,13 @@ namespace IngameScript
             return blocks;
 
         }
-        static List<T> GetBlocks<T>(bool useSubgrids = false) where T : class, IMyTerminalBlock
+        public static List<T> GetBlocks<T>(bool useSubgrids = false) where T : class, IMyTerminalBlock
         {
             List<T> blocks = new List<T>();
             gridSystem.GetBlocksOfType(blocks);
             if (!useSubgrids)
                 blocks.RemoveAll(block => block.CubeGrid.EntityId != gridId);
             return blocks;
-        }
-        #endregion
-
-        #region DebugDraw
-
-        public class DebugAPI
-        {
-            public readonly bool ModDetected;
-
-            public void RemoveDraw() => _removeDraw?.Invoke(_pb);
-            Action<IMyProgrammableBlock> _removeDraw;
-
-            public void RemoveAll() => _removeAll?.Invoke(_pb);
-            Action<IMyProgrammableBlock> _removeAll;
-
-            public void Remove(int id) => _remove?.Invoke(_pb, id);
-            Action<IMyProgrammableBlock, int> _remove;
-
-            public int DrawPoint(Vector3D origin, Color color, float radius = 0.2f, float seconds = DefaultSeconds, bool? onTop = null) => _point?.Invoke(_pb, origin, color, radius, seconds, onTop ?? _defaultOnTop) ?? -1;
-            Func<IMyProgrammableBlock, Vector3D, Color, float, float, bool, int> _point;
-
-            public int DrawLine(Vector3D start, Vector3D end, Color color, float thickness = DefaultThickness, float seconds = DefaultSeconds, bool? onTop = null) => _line?.Invoke(_pb, start, end, color, thickness, seconds, onTop ?? _defaultOnTop) ?? -1;
-            Func<IMyProgrammableBlock, Vector3D, Vector3D, Color, float, float, bool, int> _line;
-
-            public int DrawAABB(BoundingBoxD bb, Color color, Style style = Style.Wireframe, float thickness = DefaultThickness, float seconds = DefaultSeconds, bool? onTop = null) => _aabb?.Invoke(_pb, bb, color, (int)style, thickness, seconds, onTop ?? _defaultOnTop) ?? -1;
-            Func<IMyProgrammableBlock, BoundingBoxD, Color, int, float, float, bool, int> _aabb;
-
-            public int DrawOBB(MyOrientedBoundingBoxD obb, Color color, Style style = Style.Wireframe, float thickness = DefaultThickness, float seconds = DefaultSeconds, bool? onTop = null) => _obb?.Invoke(_pb, obb, color, (int)style, thickness, seconds, onTop ?? _defaultOnTop) ?? -1;
-            Func<IMyProgrammableBlock, MyOrientedBoundingBoxD, Color, int, float, float, bool, int> _obb;
-
-            public int DrawSphere(BoundingSphereD sphere, Color color, Style style = Style.Wireframe, float thickness = DefaultThickness, int lineEveryDegrees = 15, float seconds = DefaultSeconds, bool? onTop = null) => _sphere?.Invoke(_pb, sphere, color, (int)style, thickness, lineEveryDegrees, seconds, onTop ?? _defaultOnTop) ?? -1;
-            Func<IMyProgrammableBlock, BoundingSphereD, Color, int, float, int, float, bool, int> _sphere;
-
-            public int DrawMatrix(MatrixD matrix, float length = 1f, float thickness = DefaultThickness, float seconds = DefaultSeconds, bool? onTop = null) => _matrix?.Invoke(_pb, matrix, length, thickness, seconds, onTop ?? _defaultOnTop) ?? -1;
-            Func<IMyProgrammableBlock, MatrixD, float, float, float, bool, int> _matrix;
-
-            public int DrawGPS(string name, Vector3D origin, Color? color = null, float seconds = DefaultSeconds) => _gps?.Invoke(_pb, name, origin, color, seconds) ?? -1;
-            Func<IMyProgrammableBlock, string, Vector3D, Color?, float, int> _gps;
-
-            public int PrintHUD(string message, Font font = Font.Debug, float seconds = 2) => _printHUD?.Invoke(_pb, message, font.ToString(), seconds) ?? -1;
-            Func<IMyProgrammableBlock, string, string, float, int> _printHUD;
-
-            public void PrintChat(string message, string sender = null, Color? senderColor = null, Font font = Font.Debug) => _chat?.Invoke(_pb, message, sender, senderColor, font.ToString());
-            Action<IMyProgrammableBlock, string, string, Color?, string> _chat;
-
-            public void DeclareAdjustNumber(out int id, double initial, double step = 0.05, Input modifier = Input.Control, string label = null) => id = _adjustNumber?.Invoke(_pb, initial, step, modifier.ToString(), label) ?? -1;
-            Func<IMyProgrammableBlock, double, double, string, string, int> _adjustNumber;
-
-            public double GetAdjustNumber(int id, double noModDefault = 1) => _getAdjustNumber?.Invoke(_pb, id) ?? noModDefault;
-            Func<IMyProgrammableBlock, int, double> _getAdjustNumber;
-
-            public int GetTick() => _tick?.Invoke() ?? -1;
-            Func<int> _tick;
-
-            public enum Style { Solid, Wireframe, SolidAndWireframe }
-            public enum Input { MouseLeftButton, MouseRightButton, MouseMiddleButton, MouseExtraButton1, MouseExtraButton2, LeftShift, RightShift, LeftControl, RightControl, LeftAlt, RightAlt, Tab, Shift, Control, Alt, Space, PageUp, PageDown, End, Home, Insert, Delete, Left, Up, Right, Down, D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, NumPad0, NumPad1, NumPad2, NumPad3, NumPad4, NumPad5, NumPad6, NumPad7, NumPad8, NumPad9, Multiply, Add, Separator, Subtract, Decimal, Divide, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 }
-            public enum Font { Debug, White, Red, Green, Blue, DarkBlue }
-
-            const float DefaultThickness = 0.02f;
-            const float DefaultSeconds = -1;
-
-            IMyProgrammableBlock _pb;
-            bool _defaultOnTop;
-
-            public DebugAPI(MyGridProgram program, bool drawOnTopDefault = false)
-            {
-                if (program == null)
-                    throw new Exception("Pass `this` into the API, not null.");
-
-                _defaultOnTop = drawOnTopDefault;
-                _pb = program.Me;
-
-                var methods = _pb.GetProperty("DebugAPI")?.As<IReadOnlyDictionary<string, Delegate>>()?.GetValue(_pb);
-                if (methods != null)
-                {
-                    Assign(out _removeAll, methods["RemoveAll"]);
-                    Assign(out _removeDraw, methods["RemoveDraw"]);
-                    Assign(out _remove, methods["Remove"]);
-                    Assign(out _point, methods["Point"]);
-                    Assign(out _line, methods["Line"]);
-                    Assign(out _aabb, methods["AABB"]);
-                    Assign(out _obb, methods["OBB"]);
-                    Assign(out _sphere, methods["Sphere"]);
-                    Assign(out _matrix, methods["Matrix"]);
-                    Assign(out _gps, methods["GPS"]);
-                    Assign(out _printHUD, methods["HUDNotification"]);
-                    Assign(out _chat, methods["Chat"]);
-                    Assign(out _adjustNumber, methods["DeclareAdjustNumber"]);
-                    Assign(out _getAdjustNumber, methods["GetAdjustNumber"]);
-                    Assign(out _tick, methods["Tick"]);
-                    RemoveAll();
-                    ModDetected = true;
-                }
-            }
-            
-
-            void Assign<T>(out T field, object method) => field = (T)method;
         }
         #endregion
     }
