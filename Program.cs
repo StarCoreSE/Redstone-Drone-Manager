@@ -81,7 +81,7 @@ namespace IngameScript
 
         // PID values
         #region PID values
-        static double kP = 16;
+        static double kP = 32;
         static double kI = 0;
         static double kD = 32;
         static double lowerBound = -1000;
@@ -762,27 +762,33 @@ namespace IngameScript
                     LineD weaponRay = new LineD(Me.CubeGrid.GetPosition(), Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid);
 
                     //bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
-                    aiTarget.BoundingBox.Translate(predictedTargetPos);
-                    bool isLinedUp = aiTarget.BoundingBox.Intersects(ref weaponRay);
+                    BoundingBoxD box = aiTarget.BoundingBox.Translate(predictedTargetPos - aiTarget.Position);
+                    bool isLinedUp = box.Intersects(ref weaponRay);
 
                     d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
-                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-                    d.DrawAABB(aiTarget.BoundingBox, Color.Red);
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
+                    d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
 
                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
                     float r = wAPI.GetMaxWeaponRange(weapon, 0);
-                    if (isLinedUp && r * r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon))
-                    {
-                        if (!weapon.GetValueBool("WC_Shoot"))
-                        {
-                            weapon.SetValueBool("WC_Shoot", true);
-                        }
-                    }
-                    else if (weapon.GetValueBool("WC_Shoot"))
-                    {
-                        weapon.SetValueBool("WC_Shoot", false);
-                    }
+
+                    Fire(weapon, isLinedUp && r * r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon));
                 }
+            }
+        }
+
+        void Fire(IMyTerminalBlock weapon, bool enabled)
+        {
+            if (enabled)
+            {
+                if (!weapon.GetValueBool("WC_Shoot"))
+                {
+                    weapon.SetValueBool("WC_Shoot", true);
+                }
+            }
+            else if (weapon.GetValueBool("WC_Shoot"))
+            {
+                weapon.SetValueBool("WC_Shoot", false);
             }
         }
 
@@ -871,9 +877,7 @@ namespace IngameScript
                 else // If on AND is drone
                 {
                     outText += "Locked on target " + aiTarget.Name + "\n";
-                    d.DrawGPS("NOT gaming...", resultPos);
 
-                    // TODO fix
                     if (frame % 2 == 0)
                     {
                         // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
@@ -889,6 +893,11 @@ namespace IngameScript
 
                         if (frame % 60 == 0)
                         {
+                            // turn off guns if target is missing
+                            if (aiTarget.IsEmpty())
+                                foreach (var weapon in fixedGuns)
+                                    Fire(weapon, false);
+
                             bool needsRecalc = false;
                             // check if any thrusters are dead
                             foreach (var t in allThrust)
@@ -1115,6 +1124,11 @@ namespace IngameScript
                     activated = false;
                     SetThrust(-1f, allThrust, false);
                     gyros.Reset();
+                    if (doCcrp)
+                    {
+                        foreach (var weapon in fixedGuns)
+                            Fire(weapon, false);
+                    }
                     if (isController && updateSource != UpdateType.IGC)
                     {
                         SendGroupMsg<String>("stop", true);
