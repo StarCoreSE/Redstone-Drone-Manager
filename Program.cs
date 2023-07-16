@@ -308,7 +308,6 @@ namespace IngameScript
         Vector3D resultPos = new Vector3D();
         double distanceTarget = 0;
         bool hasABs = false;
-        Vector3D movement = new Vector3D(); // Velocity
 
         double speed = 0;
         int id = -1; // Per-drone ID. Used for formation flight. Controller is always -1
@@ -535,9 +534,10 @@ namespace IngameScript
             gridId = Me.CubeGrid.EntityId;
             frame = 0;
 
-            // TODO: Add asteroid detection
+            // Sets PB surface to text for error reporting.
+            Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
 
-            Echo("[color=#FF00FF00]\nSuccessfully initialized - disregard above message.\n Initialized as a [/color]" + (isController ? "controller." : "drone."));
+            Echo("[color=#FF00FF00]\nSuccessfully initialized as a [/color]" + (isController ? "controller." : "drone."));
         }
 
         public bool IGCHandler(UpdateType updateSource)
@@ -792,6 +792,7 @@ namespace IngameScript
             }
         }
 
+        int errorCounter = 0;
         public void Main(string argument, UpdateType updateSource)
         {
             // Prevents running multiple times per tick
@@ -799,6 +800,7 @@ namespace IngameScript
                 return;
 
             d.RemoveAll();
+
             if (!canRun) // If unable to init WC api, do not run.
             {
                 Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
@@ -824,10 +826,12 @@ namespace IngameScript
 
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+            
             if (!isController)
                 d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
 
-            if (id == -1 && !isController) // If ID unset and is not controller, ping controller for ID.
+            // If ID unset and is not controller, ping controller for ID.
+            if (id == -1 && !isController)
             {
                 activated = false;
                 IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
@@ -836,202 +840,224 @@ namespace IngameScript
 
             if (activated) // Generic "I'm on!" stuff
             {
-                // Share World Axis-Aligned Bounding Box for collision avoidance
-                IGC.SendBroadcastMessage("dpos", Me.CubeGrid.WorldAABB);
-
-                // Calculate velocity, because keen is a dum dum
-                movement = centerOfGrid - Me.CubeGrid.GetPosition();
-                centerOfGrid = Me.CubeGrid.GetPosition();
-
-                aiTarget = wAPI.GetAiFocus(gridId).Value;
-
-
-                outText += "Velocity " + speed + "\n";
-
-                if (frame % 60 == 0)
+                try
                 {
-                    speed = movement.Length() * 60;
+                    // Share World Axis-Aligned Bounding Box for collision avoidance
+                    IGC.SendBroadcastMessage("dpos", Me.CubeGrid.WorldAABB);
 
-                    AutoFortify();
+                    centerOfGrid = Me.CubeGrid.GetPosition();
 
-                    AutoIntegrity();
+                    aiTarget = wAPI.GetAiFocus(gridId).Value;
 
-                    // Revengance status
-                    if (!isController && !(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
+
+                    outText += "Velocity " + speed + "\n";
+
+                    if (frame % 60 == 0)
                     {
-                        if (DateTime.Now.Ticks - lastControllerPing > 100000000) // If hasn't recieved message within 10 seconds
+                        speed = Me.CubeGrid.LinearVelocity.Length();
+
+                        AutoFortify();
+
+                        AutoIntegrity();
+
+                        // Revengance status
+                        if (!isController && !(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
                         {
-                            mode = 0;          // Go into freeflight mode
-                            autoTarget = true; // Automatically attack the nearest enemy
-                            antenna.HudText = new Random().NextDouble() > 0.5 ? "YOU BASTARD!" : "I'LL KILL YOU!"; // Ree at the enemy
-                        }
-                    }
-                }
-
-                if (isController) // If on AND is controller
-                {
-                    // Update drones with new instructions/positions
-                    IGCSendHandler();
-                }
-
-                else // If on AND is drone
-                {
-                    outText += "Locked on target " + aiTarget.Name + "\n";
-
-                    if (frame % 2 == 0)
-                    {
-                        // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
-                        if (!healController && (mode == 0 || autoTarget) && frame % 60 == 0)
-                            wAPI.SetAiFocus(Me, GetClosestTarget());
-
-                        resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
-
-                        if (doCcrp)
-                            CCRPHandler();
-                        else
-                            outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
-
-                        if (frame % 60 == 0)
-                        {
-                            // turn off guns if target is missing
-                            if (aiTarget.IsEmpty())
-                                foreach (var weapon in fixedGuns)
-                                    Fire(weapon, false);
-
-                            bool needsRecalc = false;
-                            // check if any thrusters are dead
-                            foreach (var t in allThrust)
+                            if (DateTime.Now.Ticks - lastControllerPing > 100000000) // If hasn't recieved message within 10 seconds
                             {
-                                if (t.WorldAABB == new BoundingBoxD())
-                                {
-                                    needsRecalc = true;
-                                    break;
-                                }
-                            }
-                            if (needsRecalc)
-                            {
-                                GridTerminalSystem.GetBlocksOfType(allThrust);
-                                RecalcThrust();
-                                outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                                mode = 0;          // Go into freeflight mode
+                                autoTarget = true; // Automatically attack the nearest enemy
+                                antenna.HudText = new Random().NextDouble() > 0.5 ? "[ANGERY]" : "IT'S JOEVER"; // Ree at the enemy
                             }
                         }
                     }
 
-                    Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(predictedTargetPos - centerOfGrid) : ctrlMatrix.Forward;
-                    Vector3D moveTo = new Vector3D();
-
-                    Vector3D stopPosition = CalcStopPosition(movement*60, centerOfGrid);
-                    d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
-                    d.DrawGPS("Stop Position", stopPosition);
-
-                    // Autostop when near zone
-                    if (stopPosition.LengthSquared() > zoneDiameter)
+                    if (isController) // If on AND is controller, Update drones with new instructions/positions
                     {
-                        d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
-                        ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+                        IGCSendHandler();
                     }
 
-                    else
+                    else // If on AND is drone
                     {
-                        switch (mode)
-                        {
-                            case 0: // Orbit Enemy
-
-                                gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
-                                moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
-
-                                // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
-                                d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                                closestCollision = CheckCollision(moveTo);
-
-                                if (closestCollision != new Vector3D())
-                                    moveTo += moveTo.Cross(closestCollision);
-                                break;
-
-                            case 1: // Orbit Controller
-
-                                double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
-
-                                if (!healController && damageAmmo != "")
-                                {
-                                    d.PrintHUD($"Damage ammo {damageAmmo}");
-                                    foreach (var wep in fixedGuns)
-                                    {
-                                        if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
-                                            break;
-                                        wep.SetValue<Int64>("WC_PickAmmo", 0);
-                                    }
-                                }
-
-                                if (dSq > formDistance * formDistance * 4 || healController)
-                                    vecToEnemy = Vector3D.Normalize(controllerPos - centerOfGrid);
-
-
-                                gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
-                                // Prevents flipping when controllerFwd is negative
-                                //moveTo = controllerPos + Vector3D.Rotate(controllerFwd.Sum > 0 ? formationPresets[formation][id] : -formationPresets[formation][id], MatrixD.CreateFromDir(controllerFwd));
-                                moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-
-                                // Check if controller is in the way. If so, avoid
-                                //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
-
-                                d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                                d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                                d.DrawGPS("Drone Position", moveTo);
-
-                                closestCollision = CheckCollision(moveTo);
-
-                                if (closestCollision != new Vector3D())
-                                    moveTo += moveTo.Cross(closestCollision);
-                                break;
-
-                            case 2: // Sit and Fortify
-
-                                gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
-
-                                moveTo = controllerPos + formationPresets[formation][id];
-
-                                closestCollision = CheckCollision(moveTo);
-
-                                if (closestCollision != new Vector3D())
-                                    moveTo += moveTo.Cross(closestCollision);
-                                break;
-                        }
-                        //ThrustControl((Vector3D.DistanceSquared(stopPosition, moveTo) > 2500 ? stopPosition : centerOfGrid) - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
-                        ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+                        RunActiveDrone();
                     }
+
+                    errorCounter = 0;
                 }
 
+                catch (Exception e)
+                {
+                    if (errorCounter > 10)
+                        throw e;
+
+                    Me.GetSurface(0).WriteText(e.ToString());
+
+                    errorCounter++;
+                }
             }
 
             if (debug) // Print runtime info
-            {
-                outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs}ms\n";
-                if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
-                if (frame % 4 == 0)
-                {
+                PrintDebugText();
 
-                    if (!isController)
-                        IGC.SendBroadcastMessage("per", Runtime.LastRunTimeMs);
-                    else
-                    {
-                        if (totalRuntime != Runtime.LastRunTimeMs)
-                        {
-                            totalRuntime = 0;
-                            totalRuntime += Runtime.LastRunTimeMs;
-                        }
-                    }
-                }
-
-                Echo(outText);
-            }
             foreach (var l in outLcds)
-            {
                 l.WriteText(outText);
-            }
+
             outText = "";
 
             frame++;
+        }
+
+        private void ActiveDroneFrame2()
+        {
+            // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
+            if (!healController && (mode == 0 || autoTarget) && frame % 60 == 0)
+                wAPI.SetAiFocus(Me, GetClosestTarget());
+
+            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
+
+            if (doCcrp)
+                CCRPHandler();
+            else
+                outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
+
+            if (frame % 60 == 0)
+            {
+                // turn off guns if target is missing
+                if (aiTarget.IsEmpty())
+                    foreach (var weapon in fixedGuns)
+                        Fire(weapon, false);
+
+                bool needsRecalc = false;
+                // check if any thrusters are dead
+                foreach (var t in allThrust)
+                {
+                    if (t.WorldAABB == new BoundingBoxD())
+                    {
+                        needsRecalc = true;
+                        break;
+                    }
+                }
+                if (needsRecalc)
+                {
+                    GridTerminalSystem.GetBlocksOfType(allThrust);
+                    RecalcThrust();
+                    outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                }
+            }
+        }
+
+        private void RunActiveDrone()
+        {
+            outText += "Locked on target " + aiTarget.Name + "\n";
+
+            if (frame % 2 == 0)
+                ActiveDroneFrame2();
+
+            Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(predictedTargetPos - centerOfGrid) : ctrlMatrix.Forward;
+            Vector3D moveTo = new Vector3D();
+
+            Vector3D stopPosition = CalcStopPosition(Me.CubeGrid.LinearVelocity, centerOfGrid);
+            d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
+            d.DrawGPS("Stop Position", stopPosition);
+
+            // Autostop when near zone
+            if (stopPosition.LengthSquared() > zoneDiameter)
+            {
+                d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
+                ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+            }
+
+            else
+            {
+                switch (mode)
+                {
+                    case 0: // Orbit Enemy
+
+                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
+                        moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+
+                        // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
+                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        closestCollision = CheckCollision(moveTo);
+
+                        if (closestCollision != new Vector3D())
+                            moveTo += moveTo.Cross(closestCollision);
+                        break;
+
+                    case 1: // Orbit Controller
+
+                        double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
+
+                        if (!healController && damageAmmo != "")
+                        {
+                            d.PrintHUD($"Damage ammo {damageAmmo}");
+                            foreach (var wep in fixedGuns)
+                            {
+                                if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
+                                    break;
+                                wep.SetValue<Int64>("WC_PickAmmo", 0);
+                            }
+                        }
+
+                        if (dSq > formDistance * formDistance * 4 || healController)
+                            vecToEnemy = Vector3D.Normalize(controllerPos - centerOfGrid);
+
+
+                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
+                        // Prevents flipping when controllerFwd is negative
+                        //moveTo = controllerPos + Vector3D.Rotate(controllerFwd.Sum > 0 ? formationPresets[formation][id] : -formationPresets[formation][id], MatrixD.CreateFromDir(controllerFwd));
+                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+
+                        // Check if controller is in the way. If so, avoid
+                        //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
+
+                        d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        d.DrawGPS("Drone Position", moveTo);
+
+                        closestCollision = CheckCollision(moveTo);
+
+                        if (closestCollision != new Vector3D())
+                            moveTo += moveTo.Cross(closestCollision);
+                        break;
+
+                    case 2: // Sit and Fortify
+
+                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
+
+                        moveTo = controllerPos + formationPresets[formation][id];
+
+                        closestCollision = CheckCollision(moveTo);
+
+                        if (closestCollision != new Vector3D())
+                            moveTo += moveTo.Cross(closestCollision);
+                        break;
+                }
+
+                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+            }
+        }
+
+        private void PrintDebugText()
+        {
+            outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs}ms\n";
+            if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
+            if (frame % 4 == 0)
+            {
+
+                if (!isController)
+                    IGC.SendBroadcastMessage("per", Runtime.LastRunTimeMs);
+                else
+                {
+                    if (totalRuntime != Runtime.LastRunTimeMs)
+                    {
+                        totalRuntime = 0;
+                        totalRuntime += Runtime.LastRunTimeMs;
+                    }
+                }
+            }
+
+            Echo(outText);
         }
 
         MyDetectedEntityInfo? bufferMadarInfo = new MyDetectedEntityInfo();
