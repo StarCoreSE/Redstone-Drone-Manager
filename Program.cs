@@ -377,12 +377,15 @@ namespace IngameScript
             wAPI = new WcPbApi();
             canRun = wAPI.Activate(Me);
             if (!canRun) return;
+            Echo("Initialized wAPI");
 
             // Init Defense Shields API
             dAPI = new PbApiWrapper(Me);
+            Echo("Initialized dsAPI");
 
             // Init Debug Draw API
             d = new DebugAPI(this);
+            Echo("Initialized debugAPI");
 
             // Squares zoneDiameter to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneDiameter *= zoneDiameter;
@@ -399,21 +402,26 @@ namespace IngameScript
                 }
             }
             else Me.CustomData = "-1";
+            Echo($"Checked customdata for group ({group})");
 
             // Init Whip's GPS Gyro Control
             gridSystem = GridTerminalSystem;
             gridId = Me.CubeGrid.EntityId;
             gyros = new GyroControl(Me, kP, kI, kD, lowerBound, upperBound, timeStep);
+            Echo("Initialized Whip's Gyro Control");
 
             // Get cockpit for controller
             GridTerminalSystem.GetBlocksOfType<IMyCockpit>(null, b => { cockpit = b; return true; });
+            Echo("Searched for cockpit " + (cockpit == null ? "null" : cockpit.CustomName));
 
             // Gets shield controllers. Also disables autofortify if no shield controllers are found.
             List<IMyTerminalBlock> shieldControllers = new List<IMyTerminalBlock>();
             List<IMyTerminalBlock> shieldModulators = new List<IMyTerminalBlock>();
             bool hasEnhancer = false;
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(shieldControllers, b => { if (!hasEnhancer) hasEnhancer = b.DefinitionDisplayNameText.Contains("Enhancer"); return b.CustomName.Contains("Shield Controller"); });
+            Echo($"Located {shieldControllers.Count} shield controllers");
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(shieldModulators, b => { return b.CustomName.Contains("Shield Modulator"); });
+            Echo($"Located {shieldModulators.Count} shield modulators");
             if (autoFortify) autoFortify = hasEnhancer;
 
             // Check if shield controller exists, set up shortcut actions for Fortify and Integrity.
@@ -421,21 +429,33 @@ namespace IngameScript
             {
                 shieldController = shieldControllers[0];
                 shieldController.GetActions(new List<ITerminalAction>(), b => { if (b.Id == "DS-C_ShieldFortify_Toggle") toggleFort = b; return true; });
-
-                shieldModulator = shieldModulators[0];
-                if (autoIntegrity) autoIntegrity = shieldModulator != null;
-                shieldModulator.GetActions(new List<ITerminalAction>(), b => { if (b.Id == "DS-M_ModulateReInforceProt_Toggle") toggleIntegrity = b; return true; });
+                Echo("Found ShieldFortify action");
             }
             catch
             {
                 Echo("[color=#FFFF0000]No shield controller![/color]");
             }
 
+            // Check if shield controller exists, set up shortcut actions for Fortify and Integrity.
+            try
+            {
+                shieldModulator = shieldModulators[0];
+                if (autoIntegrity) autoIntegrity = shieldModulator != null;
+                shieldModulator.GetActions(new List<ITerminalAction>(), b => { if (b.Id == "DS-M_ModulateReInforceProt_Toggle") toggleIntegrity = b; return true; });
+                Echo("Found ModulateReInforceProt action");
+            }
+            catch
+            {
+                Echo("[color=#FFFF0000]No shield modulator![/color]");
+            }
+
             // Autosets mass if ship controller detected
             GridTerminalSystem.GetBlocksOfType<IMyShipController>(null, b => { mass = b.CalculateShipMass().TotalMass; return true; });
+            Echo("Set grid mass to " + mass);
 
             // Set antenna ranges to 25k (save a tiny bit of power)
             GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(null, b => { b.Radius = 25000; antenna = b; return true; });
+            Echo("Set antenna radii to 25km");
 
             // Get LCDs with name containing 'Rocketman' and sets them up
             if (isController || debug) GridTerminalSystem.GetBlocksOfType(outLcds, b => b.CustomName.ToLower().Contains("rocketman"));
@@ -444,6 +464,7 @@ namespace IngameScript
                 l.ContentType = ContentType.TEXT_AND_IMAGE;
                 if (!l.CustomData.Contains("hudlcd")) l.CustomData = "hudlcd";
             }
+            Echo($"Found {outLcds.Count} LCDs");
 
             // Get fixed guns
             try
@@ -454,6 +475,7 @@ namespace IngameScript
             {
                 doCcrp = false;
             }
+            Echo($"Found {fixedGuns.Count} fixed weapons");
 
             try
             {
@@ -482,32 +504,43 @@ namespace IngameScript
             {
                 Echo("[color=#FFFFAA00]No afterburners detected![/color]");
             }
+            Echo($"Found {allABs.Count} afterburners");
 
             // Sort afterburners
             RecalcABs();
+            Echo($"Sorted {allABs.Count} afterburners");
 
             // Get all thrust
-            GridTerminalSystem.GetBlocksOfType<IMyThrust>(allThrust);
+            GridTerminalSystem.GetBlocksOfType(allThrust);
+            Echo($"Found {allThrust.Count} thrusters");
 
             // Sort thrust and calculate total thrust per direction
             RecalcThrust();
+            Echo($"Sorted {allThrust.Count} thrusters");
 
             // Set gyro and thrust override to 0
             gyros.Reset();
             SetThrust(-1f, allThrust, false);
+            Echo("Reset thrust and gyro control");
 
             // Init IGC (Inter-Grid Communications) listener
             myBroadcastListener = IGC.RegisterBroadcastListener(isController ? "-1" : group.ToString());
+            Echo("Inited myBroadcastListener");
 
             positionListener = IGC.RegisterBroadcastListener("pos" + (multipleControllers ? group.ToString() : ""));
+            Echo("Inited positionListener");
 
             velocityListener = IGC.RegisterBroadcastListener("vel" + (multipleControllers ? group.ToString() : ""));
+            Echo("Inited velocityListener");
 
             orientListener = IGC.RegisterBroadcastListener("ori" + (multipleControllers ? group.ToString() : ""));
+            Echo("Inited orientListener");
 
             performanceListener = IGC.RegisterBroadcastListener("per");
+            Echo("Inited performanceListener");
 
             dronePosListener = IGC.RegisterBroadcastListener("dpos");
+            Echo("Inited dronePosListener");
 
             antenna.HudText = "Awaiting " + (isController ? "Drones!" : "Controller!");
 
@@ -516,6 +549,7 @@ namespace IngameScript
                 SendGroupMsg<String>("r", true); // Reset drone IDs
                 SendGroupMsg<String>("m" + mainDistance, true);
                 SendGroupMsg<String>("o" + formDistance, true);
+                Echo("Reset drone IDs and shared formation distances");
             }
 
             try
@@ -814,7 +848,7 @@ namespace IngameScript
             {
                 Runtime.UpdateFrequency = activated ? UpdateFrequency.Update1 : UpdateFrequency.Update100;
             }
-           
+
             if (IGCHandler(updateSource))
                 lastControllerPing = DateTime.Now.Ticks;
 
@@ -827,7 +861,7 @@ namespace IngameScript
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
             
-            if (!isController)
+            //if (!isController)
                 //d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
 
             // If ID unset and is not controller, ping controller for ID.
