@@ -666,7 +666,7 @@ namespace IngameScript
             if ((mode == 1) && frame % 2 == 0)
             {
                 MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
-                d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
+                //d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
 
                 if (rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, (frame / rotateDividend % 360) / 57.2957795f);
@@ -730,7 +730,7 @@ namespace IngameScript
 
                 foreach (var weapon in fixedGuns)
                 {
-                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
                     if (isLinedUp && wAPI.IsWeaponReadyToFire(weapon))
                     {
                         if (!weapon.GetValueBool("WC_Shoot"))
@@ -765,9 +765,9 @@ namespace IngameScript
                     BoundingBoxD box = aiTarget.BoundingBox.Translate(predictedTargetPos - aiTarget.Position);
                     bool isLinedUp = box.Intersects(ref weaponRay);
 
-                    d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
-                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
-                    d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
+                    //d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
+                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
+                    //d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
 
                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
                     float r = wAPI.GetMaxWeaponRange(weapon, 0);
@@ -799,7 +799,7 @@ namespace IngameScript
             if (updateSource == UpdateType.IGC)
                 return;
 
-            d.RemoveAll();
+            //d.RemoveAll();
 
             if (!canRun) // If unable to init WC api, do not run.
             {
@@ -828,7 +828,7 @@ namespace IngameScript
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
             
             if (!isController)
-                d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
+                //d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
 
             // If ID unset and is not controller, ping controller for ID.
             if (id == -1 && !isController)
@@ -961,13 +961,13 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
 
             Vector3D stopPosition = CalcStopPosition(Me.CubeGrid.LinearVelocity, centerOfGrid);
-            d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
-            d.DrawGPS("Stop Position", stopPosition);
+            //d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
+            //d.DrawGPS("Stop Position", stopPosition);
 
             // Autostop when near zone
             if (stopPosition.LengthSquared() > zoneDiameter)
             {
-                d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
+                //d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
                 ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
 
@@ -981,7 +981,7 @@ namespace IngameScript
                         moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
 
                         // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
-                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                         closestCollision = CheckCollision(moveTo);
 
                         if (closestCollision != new Vector3D())
@@ -994,7 +994,7 @@ namespace IngameScript
 
                         if (!healController && damageAmmo != "")
                         {
-                            d.PrintHUD($"Damage ammo {damageAmmo}");
+                            //d.PrintHUD($"Damage ammo {damageAmmo}");
                             foreach (var wep in fixedGuns)
                             {
                                 if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
@@ -1015,9 +1015,9 @@ namespace IngameScript
                         // Check if controller is in the way. If so, avoid
                         //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
 
-                        d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                        d.DrawGPS("Drone Position", moveTo);
+                        //d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                        //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        //d.DrawGPS("Drone Position", moveTo);
 
                         closestCollision = CheckCollision(moveTo);
 
@@ -1177,7 +1177,7 @@ namespace IngameScript
                         if (healAmmo != "") healController = true;
                         else return;
                         wAPI.SetAiFocus(Me, controlID);
-                        d.PrintHUD($"Healing ammo {healAmmo}");
+                        //d.PrintHUD($"Healing ammo {healAmmo}");
                         foreach (var wep in fixedGuns)
                         {
                             wep.SetValue<Int64>("WC_PickAmmo", 1);
@@ -1272,7 +1272,7 @@ namespace IngameScript
                 //    long targetID;
                 //    if (mode != 0 && !autoTarget && long.TryParse(argument, out targetID))
                 //    {
-                //        d.PrintChat("Set target to " + targetID);
+                //        //d.PrintChat("Set target to " + targetID);
                 //        wAPI.SetAiFocus(Me, targetID);
                 //    }
                 //    break;
