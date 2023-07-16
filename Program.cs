@@ -888,7 +888,11 @@ namespace IngameScript
                 catch (Exception e)
                 {
                     if (errorCounter > 10)
+                    {
+                        if (antenna != null)
+                            antenna.HudText += " [CRASHED]";
                         throw e;
+                    }
 
                     Me.GetSurface(0).WriteText(e.ToString());
 
