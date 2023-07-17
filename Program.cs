@@ -75,8 +75,8 @@ namespace IngameScript
         // Name of the terminal group containing the drone's afterburners. Make sure it's balanced!
         string abGroup = "Afterburners";
 
-        // Diameter of the harm zone.
-        int zoneDiameter = 12000;
+        // Radius of the harm zone.
+        int zoneRadius = 12000;
 
 
         // PID values
@@ -198,6 +198,7 @@ namespace IngameScript
         long lastControllerPing = 0;
 
         static readonly double cos45 = Math.Sqrt(2) / 2;
+        int ozoneRadius;
 
         int formation = 0;
         readonly Vector3D[][] formationPresets = new Vector3D[][] {
@@ -387,8 +388,9 @@ namespace IngameScript
             d = new DebugAPI(this);
             Echo("Initialized debugAPI");
 
-            // Squares zoneDiameter to avoid Vector3D.Distance() calls. Roots are quite unperformant.
-            zoneDiameter *= zoneDiameter;
+            // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
+            zoneRadius *= zoneRadius;
+            ozoneRadius = (int)Math.Sqrt(zoneRadius * 0.95);
 
             if (!isController)
             {
@@ -603,6 +605,7 @@ namespace IngameScript
                     {
                         activated = true;
                         centerOfGrid = Me.CubeGrid.GetPosition();
+                        Runtime.UpdateFrequency = UpdateFrequency.Update1;
                     }
                     wasMessageRecieved = true;
                 }
@@ -853,7 +856,7 @@ namespace IngameScript
                     Init();
                 return;
             }
-            else if ((!isController || mode == 1) && activated) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
+            else if ((!isController || mode == 1) && !activated) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
             if (IGCHandler(updateSource))
@@ -991,6 +994,8 @@ namespace IngameScript
             }
         }
 
+        private bool nearZone = false;
+
         private void RunActiveDrone()
         {
             outText += "Locked on target " + aiTarget.Name + "\n";
@@ -1005,10 +1010,13 @@ namespace IngameScript
             d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
             d.DrawGPS("Stop Position", stopPosition);
 
+            nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+
             // Autostop when near zone
-            if (stopPosition.LengthSquared() > zoneDiameter)
+            if (nearZone)
             {
                 d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
+                antenna.HudText += " [ZONE]";
                 ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
 
@@ -1078,6 +1086,8 @@ namespace IngameScript
                             moveTo += moveTo.Cross(closestCollision);
                         break;
                 }
+
+                moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
 
                 ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
