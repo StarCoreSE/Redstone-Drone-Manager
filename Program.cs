@@ -43,7 +43,7 @@ namespace IngameScript
         bool autoTarget = false;
 
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [TRUE]
-        bool rotate = false;
+        bool rotate = TRUE;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float rotateDividend = 6;
@@ -1010,7 +1010,7 @@ namespace IngameScript
             d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
             d.DrawGPS("Stop Position", stopPosition);
 
-            nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+            //nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
 
             // Autostop when near zone
             if (nearZone)
@@ -1087,7 +1087,7 @@ namespace IngameScript
                         break;
                 }
 
-                moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
+                //moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
 
                 ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
