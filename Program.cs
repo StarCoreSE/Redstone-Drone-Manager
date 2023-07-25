@@ -47,7 +47,7 @@ namespace IngameScript
         bool autoTarget = false;
 
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [TRUE]
-        bool rotate = TRUE;
+        bool rotate = true;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float rotateDividend = 6;
@@ -1017,20 +1017,14 @@ namespace IngameScript
             //d.DrawGPS("Stop Position", stopPosition);
 
             if (isStarcore)
-            {
                 nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-            }
             else
-            {
                 nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-            }
 
             // Autostop when near zone
             if (nearZone)
             {
-                //d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
                 antenna.HudText += " [ZONE]";
-            
                 
                 ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
@@ -1103,14 +1097,9 @@ namespace IngameScript
                 }
 
                 if (isStarcore) 
-                {
-                moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
-                }
-
+                    moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
                 else
-                {
-                moveTo = Vector3D.ClampToSphere(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
-                }
+                    moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
 
                 ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
@@ -1346,10 +1335,7 @@ namespace IngameScript
                 //default:
                 //    long targetID;
                 //    if (mode != 0 && !autoTarget && long.TryParse(argument, out targetID))
-                //    {
-                //        //d.PrintChat("Set target to " + targetID);
                 //        wAPI.SetAiFocus(Me, targetID);
-                //    }
                 //    break;
             }
         }
