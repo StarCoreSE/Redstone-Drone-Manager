@@ -294,7 +294,6 @@ namespace IngameScript
         string healAmmo = "";
         bool healController = false;
 
-        VectorPID pid = new VectorPID(kP, kI, kD, lowerBound, upperBound, timeStep);
         MatrixD ctrlMatrix = new MatrixD();
         bool isFortified = false;
         bool isIntegrity = false;
