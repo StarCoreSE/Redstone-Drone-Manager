@@ -27,39 +27,35 @@ namespace IngameScript
 
         /* GENERAL SETTINGS */
 
-        //is this starcore??? Default [TRUE]
-        //do you know what that is? if not set to false, also uh, starcore.tv you should check it out -thecrystalwoods
-        bool isStarcore = true;
-
         // If this PB is on a drone, set to 'false'. If this PB is on a ship, set to 'true'.
         bool isController = false;
 
         // Set this to true if multiple controllers are in use
         bool multipleControllers = false;
 
-        // If speed <12 m/s, fortify and shieldfit 0. Else unfortify. Default [TRUE]
+        // If speed <12 m/s, fortify and shieldfit 0. Else unfortify. Default [true]
         bool autoFortify = true;
 
-        // If enemy <100m, enable structural integrity. Else unset integrity. Default [TRUE]
+        // If enemy <100m, enable structural integrity. Else unset integrity. Default [true]
         bool autoIntegrity = true;
 
-        // If true, find own target. If false, use controller target. Default [FALSE]
+        // If true, find own target. If false, use controller target. Default [false]
         bool autoTarget = false;
 
-        // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [TRUE]
+        // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [true]
         bool rotate = true;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float rotateDividend = 6;
 
-        // How far drones in formation should be from the controller.
+        // How far (in meters) drones in formation should be from the controller. Default [250]
         static int formDistance = 250;
 
-        // How far drones in 'main' mode should orbit from the target.
+        // How far (in meters) drones in 'main' mode should orbit from the target. Default [1000]
         int mainDistance = 1000;
 
-        // Toggles debug mode. Outputs performance, may increase performance cost
-        bool debug = true;
+        // Toggles debug mode. Outputs performance, but increases performance cost. Default [250]
+        bool debug = false;
 
 
         /* DRONE SETTINGS */
@@ -80,7 +76,11 @@ namespace IngameScript
         // Name of the terminal group containing the drone's afterburners. Make sure it's balanced!
         string abGroup = "Afterburners";
 
-        // Radius of the harm zone. this is in meters, not km
+        // If true, remain within [zoneRadius] of world origin. If false, remain within [zoneRadius] of controller. Default [true]
+        //do you know what that is? if not set to false, also uh, starcore.tv you should check it out -thecrystalwoods
+        bool fixedFlightArea = true;
+
+        // Radius of the harm zone. this is in meters, not km.
         // if not starcore, this is the size of the leash (aka how far the drone should go outfrom the controlling grid, SET THIS SMALLER JESUS FUCK, or don't, i'm not your fucking mom - thecrystalwoods
         int zoneRadius = 12000;
 
@@ -133,7 +133,7 @@ namespace IngameScript
 
         // In Development Version //
         //now with 2!!! contributers!!!!1!11!1!!!111!//
-
+        // holy hell //
 
 
 
@@ -155,7 +155,8 @@ namespace IngameScript
 
         int mode = 1;
         /*
-         * 0 - Shoot and Scoot
+         * 0 - Main
+         *     Shoot and Scoot
          *     Swarm and Shoot
          * 
          * 1 - Wingman
@@ -176,7 +177,6 @@ namespace IngameScript
 
         Vector3D centerOfGrid = new Vector3D(); // Me.position
         IMyCockpit cockpit;
-        List<IMyTerminalBlock> detectors = new List<IMyTerminalBlock>();
 
         long frame = 0;
 
@@ -355,7 +355,7 @@ namespace IngameScript
 
         List<IMyTextPanel> outLcds = new List<IMyTextPanel>();
 
-        List<IMyTerminalBlock> madars = new List<IMyTerminalBlock>();
+        //List<IMyTerminalBlock> madars = new List<IMyTerminalBlock>();
 
         #endregion
 
@@ -466,7 +466,9 @@ namespace IngameScript
             Echo("Set antenna radii to 25km");
 
             // Get LCDs with name containing 'Rocketman' and sets them up
-            if (isController || debug) GridTerminalSystem.GetBlocksOfType(outLcds, b => b.CustomName.ToLower().Contains("rocketman"));
+            if (isController || debug)
+                GridTerminalSystem.GetBlocksOfType(outLcds, b => b.CustomName.ToLower().Contains("rocketman"));
+
             foreach (var l in outLcds)
             {
                 l.ContentType = ContentType.TEXT_AND_IMAGE;
@@ -566,8 +568,8 @@ namespace IngameScript
             }
             catch { }
 
-            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(madars, b => b.DefinitionDisplayNameText == "MADAR");
-            Echo($"Found {madars.Count()} MADARs.");
+            //GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(madars, b => b.DefinitionDisplayNameText == "MADAR");
+            //Echo($"Found {madars.Count()} MADARs.");
 
             // Convert maxOffset from human-readable format to dot product
             maxOffset = Math.Cos(maxOffset / 57.2957795);
@@ -1016,7 +1018,7 @@ namespace IngameScript
             //d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
             //d.DrawGPS("Stop Position", stopPosition);
 
-            if (isStarcore)
+            if (fixedFlightArea)
                 nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
             else
                 nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
@@ -1096,7 +1098,7 @@ namespace IngameScript
                         break;
                 }
 
-                if (isStarcore) 
+                if (fixedFlightArea) 
                     moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
                 else
                     moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
@@ -1132,20 +1134,20 @@ namespace IngameScript
         public Vector3D CheckCollision(Vector3D stopPosition)
         {
             // holy mother of jank
-            foreach (var m in madars)
-            {
-                bufferMadarInfo = wAPI.GetWeaponTarget(m, 22);
-                if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
-                    dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
-
-                bufferMadarInfo = wAPI.GetWeaponTarget(m, 23);
-                if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
-                    dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
-
-                bufferMadarInfo = wAPI.GetWeaponTarget(m, 24);
-                if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
-                    dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
-            }
+            //foreach (var m in madars)
+            //{
+            //    bufferMadarInfo = wAPI.GetWeaponTarget(m, 22);
+            //    if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
+            //        dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
+            //
+            //    bufferMadarInfo = wAPI.GetWeaponTarget(m, 23);
+            //    if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
+            //        dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
+            //
+            //    bufferMadarInfo = wAPI.GetWeaponTarget(m, 24);
+            //    if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
+            //        dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
+            //}
 
             LineD r = new LineD(Me.CubeGrid.GetPosition(), stopPosition);
 
