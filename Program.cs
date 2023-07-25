@@ -27,6 +27,10 @@ namespace IngameScript
 
         /* GENERAL SETTINGS */
 
+        //is this starcore??? Default [TRUE]
+        //do you know what that is? if not set to false, also uh, starcore.tv you should check it out -thecrystalwoods
+        bool isStarcore = true;
+
         // If this PB is on a drone, set to 'false'. If this PB is on a ship, set to 'true'.
         bool isController = false;
 
@@ -43,7 +47,7 @@ namespace IngameScript
         bool autoTarget = false;
 
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [TRUE]
-        bool rotate = false;
+        bool rotate = TRUE;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float rotateDividend = 6;
@@ -61,12 +65,13 @@ namespace IngameScript
         /* DRONE SETTINGS */
 
         // Set this to the grid's mass (in KG) IF there is no controller (cockpit, remote control) on the grid.
+        // put one of these on the fucking drone or i'll fucking show up in your room while you're asleep and steal shit -thecrystalwoods
         float mass = 1300000;
 
         // Toggles if CCRP (autofire fixed guns) runs. Leave this on, I beg you. Default [TRUE]
         bool doCcrp = true;
 
-        // Maximum innacuracy of CCRP in degrees. A lower number = higher accuracy requirement. Default [1]
+        // Maximum innacuracy of CCRP in degrees. A lower number = higher accuracy requirement. Default [2]
         double maxOffset = 2;
 
         // Name of the terminal group containing the drone's fixed guns.
@@ -75,7 +80,8 @@ namespace IngameScript
         // Name of the terminal group containing the drone's afterburners. Make sure it's balanced!
         string abGroup = "Afterburners";
 
-        // Radius of the harm zone.
+        // Radius of the harm zone. this is in meters, not km
+        // if not starcore, this is the size of the leash (aka how far the drone should go outfrom the controlling grid, SET THIS SMALLER JESUS FUCK, or don't, i'm not your fucking mom - thecrystalwoods
         int zoneRadius = 12000;
 
 
@@ -102,8 +108,8 @@ namespace IngameScript
         // DON'T EDIT BELOW THIS LINE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING //
         // OR YOU'RE ARISTEAS //
         // I CAN'T STOP MYSELF //
-
-
+        //or you're oat :P//
+        
 
 
 
@@ -126,6 +132,7 @@ namespace IngameScript
         #endregion
 
         // In Development Version //
+        //now with 2!!! contributers!!!!1!11!1!!!111!//
 
 
 
@@ -1009,13 +1016,22 @@ namespace IngameScript
             //d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
             //d.DrawGPS("Stop Position", stopPosition);
 
-            nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+            if (isStarcore)
+            {
+                nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+            }
+            else
+            {
+                nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+            }
 
             // Autostop when near zone
             if (nearZone)
             {
                 //d.PrintHUD("YOU BLOODY IDIOT, YOU MADE ME GO OUT OF THE ZONE");
                 antenna.HudText += " [ZONE]";
+            
+                
                 ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
 
@@ -1086,7 +1102,15 @@ namespace IngameScript
                         break;
                 }
 
+                if (isStarcore) 
+                {
                 moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
+                }
+
+                else
+                {
+                moveTo = Vector3D.ClampToSphere(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
+                }
 
                 ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
             }
