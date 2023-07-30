@@ -23,6 +23,11 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
         #region mdk preserve
+
+        // Updated 7/28/23 //
+
+
+
         /* CONFIG */
 
         /* GENERAL SETTINGS */
@@ -76,6 +81,15 @@ namespace IngameScript
         // Name of the terminal group containing the drone's afterburners. Make sure it's balanced!
         string abGroup = "Afterburners";
 
+        // Name of the terminal group containing the drone's flares. Currently only supports single-use flares.
+        string flareGroupName = "Flares";
+
+        // Minimum number of missiles targeting this grid before autoflare triggers.
+        int missilesToFlare = 4;
+
+        // Minimum age in seconds of oldest missile before autoflare triggers.
+        int minMissileAge = 2;
+
         // If true, remain within [zoneRadius] of world origin. If false, remain within [zoneRadius] of controller. Default [true]
         //do you know what that is? if not set to false, also uh, starcore.tv you should check it out -thecrystalwoods
         bool fixedFlightArea = true;
@@ -95,6 +109,27 @@ namespace IngameScript
         static double timeStep = 1.0 / 60;
         #endregion
 
+        string[] angryText = new string[]
+        {
+            "[ANGERY]",
+            "YOU SHOULD FLY INTO THE HARMZONE... NOW!",
+            "*Pumped Up Kicks*",
+            "R2D2 noises",
+            "IT'S JOEVER",
+            "Healing Spartan...",
+            "THE FEDS ARE HERE",
+            "controller died of ligma",
+            "Large Grid 80085",
+            "aristeas says hi",
+            "PMW mode enabled",
+            "Call an ambulance! Call an ambulance!",
+            "yummy blocker plates",
+            "WHO TOUCHED MY GUN",
+            "send nukes",
+            "Anomaly would be proud",
+            "zone-chan is the best waifu"
+        };
+
 
 
 
@@ -107,9 +142,9 @@ namespace IngameScript
 
         // DON'T EDIT BELOW THIS LINE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING //
         // OR YOU'RE ARISTEAS //
-        // I CAN'T STOP MYSELF //
         //or you're oat :P//
-        
+        // I CAN'T STOP MYSELF //
+
 
 
 
@@ -189,13 +224,14 @@ namespace IngameScript
         IMyBroadcastListener velocityListener;
         IMyBroadcastListener orientListener;
         IMyBroadcastListener performanceListener;
-        IMyBroadcastListener dronePosListener;
 
 
         int group = 1; // Supports groups 1 through 4.
 
         List<long> droneEntities = new List<long>();
-        IDictionary<long, BoundingBoxD> dronePositions = new Dictionary<long, BoundingBoxD>();
+        List<MyDetectedEntityInfo> friendlies = new List<MyDetectedEntityInfo>();
+
+        MyTuple<bool, int, int> projectilesLockedOn = new MyTuple<bool, int, int>(false, 0, -1);
 
         string outText = ""; // Text buffer to avoid lag:tm:
 
@@ -209,97 +245,97 @@ namespace IngameScript
 
         int formation = 0;
         readonly Vector3D[][] formationPresets = new Vector3D[][] {
-                            new Vector3D[] // X
-                            {
-                                // Max 32
+            new Vector3D[] // X
+            {
+                // Max 32
 
-                                // Ring 1
-                                new Vector3D(formDistance, 0, 0),
-                                new Vector3D(-formDistance, 0, 0),
-                                new Vector3D(0, formDistance, 0),
-                                new Vector3D(0, -formDistance, 0),
-                                new Vector3D(cos45*formDistance, cos45*formDistance, 0),
-                                new Vector3D(cos45*formDistance, -cos45*formDistance, 0),
-                                new Vector3D(-cos45*formDistance, cos45*formDistance, 0),
-                                new Vector3D(-cos45*formDistance, -cos45*formDistance, 0),
+                // Ring 1
+                new Vector3D(formDistance, 0, 0),
+                new Vector3D(-formDistance, 0, 0),
+                new Vector3D(0, formDistance, 0),
+                new Vector3D(0, -formDistance, 0),
+                new Vector3D(cos45*formDistance, cos45*formDistance, 0),
+                new Vector3D(cos45*formDistance, -cos45*formDistance, 0),
+                new Vector3D(-cos45*formDistance, cos45*formDistance, 0),
+                new Vector3D(-cos45*formDistance, -cos45*formDistance, 0),
 
-                                // Ring 2
-                                new Vector3D(1.5*formDistance, 0, 0),
-                                new Vector3D(-1.5*formDistance, 0, 0),
-                                new Vector3D(0, 1.5*formDistance, 0),
-                                new Vector3D(0, -1.5*formDistance, 0),
-                                new Vector3D(1.5*cos45*formDistance, 1.5*cos45*formDistance, 0),
-                                new Vector3D(1.5*cos45*formDistance, -1.5*cos45*formDistance, 0),
-                                new Vector3D(-1.5*cos45*formDistance, 1.5*cos45*formDistance, 0),
-                                new Vector3D(-1.5*cos45*formDistance, -1.5*cos45*formDistance, 0),
+                // Ring 2
+                new Vector3D(1.5*formDistance, 0, 0),
+                new Vector3D(-1.5*formDistance, 0, 0),
+                new Vector3D(0, 1.5*formDistance, 0),
+                new Vector3D(0, -1.5*formDistance, 0),
+                new Vector3D(1.5*cos45*formDistance, 1.5*cos45*formDistance, 0),
+                new Vector3D(1.5*cos45*formDistance, -1.5*cos45*formDistance, 0),
+                new Vector3D(-1.5*cos45*formDistance, 1.5*cos45*formDistance, 0),
+                new Vector3D(-1.5*cos45*formDistance, -1.5*cos45*formDistance, 0),
 
-                                // Ring 3
-                                new Vector3D(3.0*formDistance, 0, 0),
-                                new Vector3D(-3.0*formDistance, 0, 0),
-                                new Vector3D(0, 3.0*formDistance, 0),
-                                new Vector3D(0, -3.0*formDistance, 0),
-                                new Vector3D(3.0*cos45*formDistance, 3.0*cos45*formDistance, 0),
-                                new Vector3D(3.0*cos45*formDistance, -3.0*cos45*formDistance, 0),
-                                new Vector3D(-3.0*cos45*formDistance, 3.0*cos45*formDistance, 0),
-                                new Vector3D(-3.0*cos45*formDistance, -3.0*cos45*formDistance, 0),
+                // Ring 3
+                new Vector3D(3.0*formDistance, 0, 0),
+                new Vector3D(-3.0*formDistance, 0, 0),
+                new Vector3D(0, 3.0*formDistance, 0),
+                new Vector3D(0, -3.0*formDistance, 0),
+                new Vector3D(3.0*cos45*formDistance, 3.0*cos45*formDistance, 0),
+                new Vector3D(3.0*cos45*formDistance, -3.0*cos45*formDistance, 0),
+                new Vector3D(-3.0*cos45*formDistance, 3.0*cos45*formDistance, 0),
+                new Vector3D(-3.0*cos45*formDistance, -3.0*cos45*formDistance, 0),
 
-                                // Ring 4
-                                new Vector3D(4.5*formDistance, 0, 0),
-                                new Vector3D(-4.5*formDistance, 0, 0),
-                                new Vector3D(0, 4.5*formDistance, 0),
-                                new Vector3D(0, -4.5*formDistance, 0),
-                                new Vector3D(4.5*cos45*formDistance, 4.5*cos45*formDistance, 0),
-                                new Vector3D(4.5*cos45*formDistance, -4.5*cos45*formDistance, 0),
-                                new Vector3D(-4.5*cos45*formDistance, 4.5*cos45*formDistance, 0),
-                                new Vector3D(-4.5*cos45*formDistance, -4.5*cos45*formDistance, 0)
-                            },
-                            new Vector3D[] // Sphere
-                            {
-                                // Max 14
+                // Ring 4
+                new Vector3D(4.5*formDistance, 0, 0),
+                new Vector3D(-4.5*formDistance, 0, 0),
+                new Vector3D(0, 4.5*formDistance, 0),
+                new Vector3D(0, -4.5*formDistance, 0),
+                new Vector3D(4.5*cos45*formDistance, 4.5*cos45*formDistance, 0),
+                new Vector3D(4.5*cos45*formDistance, -4.5*cos45*formDistance, 0),
+                new Vector3D(-4.5*cos45*formDistance, 4.5*cos45*formDistance, 0),
+                new Vector3D(-4.5*cos45*formDistance, -4.5*cos45*formDistance, 0)
+            },
+            new Vector3D[] // Sphere
+            {
+                // Max 14
 
-                                new Vector3D(formDistance, 0, 0),
-                                new Vector3D(-formDistance, 0, 0),
-                                new Vector3D(0, formDistance, 0),
-                                new Vector3D(0, -formDistance, 0),
-                                new Vector3D(0, 0, formDistance),
-                                new Vector3D(0, 0, -formDistance),
+                new Vector3D(formDistance, 0, 0),
+                new Vector3D(-formDistance, 0, 0),
+                new Vector3D(0, formDistance, 0),
+                new Vector3D(0, -formDistance, 0),
+                new Vector3D(0, 0, formDistance),
+                new Vector3D(0, 0, -formDistance),
 
-                                new Vector3D(cos45*formDistance, cos45*formDistance, 0),
-                                new Vector3D(cos45*formDistance, -cos45*formDistance, 0),
-                                new Vector3D(-cos45*formDistance, cos45*formDistance, 0),
-                                new Vector3D(-cos45*formDistance, -cos45*formDistance, 0),
-                                new Vector3D(0, cos45*formDistance, cos45*formDistance),
-                                new Vector3D(0, cos45*formDistance, -cos45*formDistance),
-                                new Vector3D(0, -cos45*formDistance, cos45*formDistance),
-                                new Vector3D(0, -cos45*formDistance, -cos45*formDistance)
-                            },
-                            new Vector3D[] // V
-                            {
-                                new Vector3D(formDistance/2, 0, -formDistance/2),
-                                new Vector3D(-formDistance/2, 0, -formDistance/2),
-                                new Vector3D(0, formDistance/2, -formDistance/2),
-                                new Vector3D(0, -formDistance/2, -formDistance/2),
-                                new Vector3D(formDistance, 0, 0),
-                                new Vector3D(-formDistance, 0, 0),
-                                new Vector3D(0, formDistance, 0),
-                                new Vector3D(0, -formDistance, 0),
-                            },
-                            new Vector3D[] // duckling formation
-                            {
-                                new Vector3D(0, 0, formDistance),
-                                new Vector3D(0, 0, 2*formDistance),
-                                new Vector3D(0, 0, 3*formDistance),
-                                new Vector3D(0, 0, 4*formDistance),
-                                new Vector3D(0, 0, 5*formDistance),
-                                new Vector3D(0, 0, 6*formDistance),
-                                new Vector3D(0, 0, 7*formDistance),
-                                new Vector3D(0, 0, 2*formDistance),
-                            },
+                new Vector3D(cos45*formDistance, cos45*formDistance, 0),
+                new Vector3D(cos45*formDistance, -cos45*formDistance, 0),
+                new Vector3D(-cos45*formDistance, cos45*formDistance, 0),
+                new Vector3D(-cos45*formDistance, -cos45*formDistance, 0),
+                new Vector3D(0, cos45*formDistance, cos45*formDistance),
+                new Vector3D(0, cos45*formDistance, -cos45*formDistance),
+                new Vector3D(0, -cos45*formDistance, cos45*formDistance),
+                new Vector3D(0, -cos45*formDistance, -cos45*formDistance)
+            },
+            new Vector3D[] // V
+            {
+                new Vector3D(formDistance/2, 0, -formDistance/2),
+                new Vector3D(-formDistance/2, 0, -formDistance/2),
+                new Vector3D(0, formDistance/2, -formDistance/2),
+                new Vector3D(0, -formDistance/2, -formDistance/2),
+                new Vector3D(formDistance, 0, 0),
+                new Vector3D(-formDistance, 0, 0),
+                new Vector3D(0, formDistance, 0),
+                new Vector3D(0, -formDistance, 0),
+            },
+            new Vector3D[] // duckling formation
+            {
+                new Vector3D(0, 0, formDistance),
+                new Vector3D(0, 0, 2*formDistance),
+                new Vector3D(0, 0, 3*formDistance),
+                new Vector3D(0, 0, 4*formDistance),
+                new Vector3D(0, 0, 5*formDistance),
+                new Vector3D(0, 0, 6*formDistance),
+                new Vector3D(0, 0, 7*formDistance),
+                new Vector3D(0, 0, 2*formDistance),
+            },
         };
 
         string damageAmmo = "";
         string healAmmo = "";
-        bool healController = false;
+        bool healMode = false;
 
         MatrixD ctrlMatrix = new MatrixD();
         bool isFortified = false;
@@ -331,6 +367,7 @@ namespace IngameScript
         List<IMyTerminalBlock> leftAB = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> rightAB = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> fixedGuns = new List<IMyTerminalBlock>();
+        List<IMyTerminalBlock> flares = new List<IMyTerminalBlock>();
         List<IMyThrust> allThrust = new List<IMyThrust>();
         IMyRadioAntenna antenna;
 
@@ -355,8 +392,6 @@ namespace IngameScript
 
         List<IMyTextPanel> outLcds = new List<IMyTextPanel>();
 
-        //List<IMyTerminalBlock> madars = new List<IMyTerminalBlock>();
-
         #endregion
 
 
@@ -368,7 +403,7 @@ namespace IngameScript
             }
             catch (Exception e)
             {
-                Echo("[color=#FFFF0000]!!! If you can see this, you're probably missing something important (i.e. antenna) !!![/color]");
+                Echo("[color=#FFFF0000] !!! If you can see this, you're probably missing something important (i.e. antenna) !!! [/color]");
                 Echo(e.Message);
             }
 
@@ -549,9 +584,6 @@ namespace IngameScript
             performanceListener = IGC.RegisterBroadcastListener("per");
             Echo("Inited performanceListener");
 
-            dronePosListener = IGC.RegisterBroadcastListener("dpos");
-            Echo("Inited dronePosListener");
-
             antenna.HudText = "Awaiting " + (isController ? "Drones!" : "Controller!");
 
             if (isController)
@@ -568,20 +600,319 @@ namespace IngameScript
             }
             catch { }
 
-            //GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(madars, b => b.DefinitionDisplayNameText == "MADAR");
-            //Echo($"Found {madars.Count()} MADARs.");
-
             // Convert maxOffset from human-readable format to dot product
             maxOffset = Math.Cos(maxOffset / 57.2957795);
             Echo("Set maxOffset to " + maxOffset);
 
-            gridId = Me.CubeGrid.EntityId;
-            frame = 0;
+            // Cache flares for later use
+            try
+            {
+                GridTerminalSystem.GetBlockGroupWithName(flareGroupName).GetBlocksOfType(flares, b => wAPI.HasCoreWeapon(b));
+            }
+            catch
+            {
+                Echo("Missing flare group of name: " + flareGroupName);
+            }
+
+            minMissileAge *= 60;
+
+            Echo("AutoFlare module initialized\n" + flares.Count + " flares detected");
 
             // Sets PB surface to text for error reporting.
             Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
 
+            gridId = Me.CubeGrid.EntityId;
+            frame = 0;
+
             Echo("[color=#FF00FF00]\nSuccessfully initialized as a [/color]" + (isController ? "controller." : "drone."));
+        }
+
+
+        int errorCounter = 0;
+        public void Main(string argument, UpdateType updateSource)
+        {
+            // Prevents running multiple times per tick
+            if (updateSource == UpdateType.IGC)
+                return;
+
+            d.RemoveAll();
+
+            if (!canRun) // If unable to init WC api, do not run.
+            {
+                Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
+
+                frame++;
+                if (frame >= 10)
+                    Init();
+                return;
+            }
+            else if ((!isController || mode == 1) && !activated) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
+                Runtime.UpdateFrequency = UpdateFrequency.Update100;
+
+            if (IGCHandler(updateSource))
+                lastControllerPing = DateTime.Now.Ticks;
+
+            try
+            {
+                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
+            }
+            catch { }
+
+            // Status info
+            outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+            
+            d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
+
+            // If ID unset and is not controller, ping controller for ID.
+            if (id == -1 && !isController)
+            {
+                activated = false;
+                IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
+                return;
+            }
+
+            if (activated) // Generic "I'm on!" stuff
+            {
+                try
+                {
+                    centerOfGrid = Me.CubeGrid.GetPosition();
+
+                    if (!healMode)
+                        aiTarget = wAPI.GetAiFocus(gridId).Value;
+
+
+                    outText += "Velocity " + speed + "\n";
+
+                    if (frame % 60 == 0)
+                    {
+                        speed = Me.CubeGrid.LinearVelocity.Length();
+
+                        AutoFortify();
+                        
+                        AutoIntegrity();
+                    }
+
+                    if (isController) // If on AND is controller, Update drones with new instructions/positions
+                    {
+                        IGCSendHandler();
+                    }
+
+                    else // If on AND is drone
+                    {
+                        RunActiveDrone();
+                    }
+
+                    errorCounter = 0;
+                }
+
+                catch (Exception e)
+                {
+                    if (errorCounter > 10)
+                    {
+                        if (antenna != null)
+                            antenna.HudText += " [CRASHED]";
+                        throw e;
+                    }
+
+                    Me.GetSurface(0).WriteText(e.ToString());
+
+                    errorCounter++;
+                }
+            }
+
+            if (debug) // Print runtime info
+                PrintDebugText();
+
+            foreach (var l in outLcds)
+                l.WriteText(outText);
+
+            outText = "";
+
+            frame++;
+        }
+
+        private void ActiveDroneFrame2()
+        {
+            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
+
+            if (doCcrp)
+                CCRPHandler();
+            else
+                outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
+
+            wAPI.GetObstructions(Me, friendlies);
+
+            AutoFlareHandler();
+
+            if (frame % 60 == 0)
+            {
+                // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
+                if (!healMode && (mode == 0 || autoTarget))
+                    wAPI.SetAiFocus(Me, GetClosestTarget());
+                else if (healMode && autoTarget)
+                    aiTarget = friendlies[0];
+                
+
+                // turn off guns if target is missing
+                if (aiTarget.IsEmpty() && !healMode)
+                    foreach (var weapon in fixedGuns)
+                        Fire(weapon, false);
+
+                bool needsRecalc = false;
+                // check if any thrusters are dead
+                foreach (var t in allThrust)
+                {
+                    if (t.WorldAABB == new BoundingBoxD())
+                    {
+                        needsRecalc = true;
+                        break;
+                    }
+                }
+                if (needsRecalc)
+                {
+                    GridTerminalSystem.GetBlocksOfType(allThrust);
+                    RecalcThrust();
+                    outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                }
+
+                // Revengance status
+                if (!(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
+                {
+                    if (DateTime.Now.Ticks - lastControllerPing > 100000000) // If hasn't recieved message within 10 seconds
+                    {
+                        mode = 0;          // Go into freeflight mode
+                        autoTarget = true; // Automatically attack the nearest enemy
+                        antenna.HudText = angryText[new Random().Next(angryText.Count())]; // Ree at the enemy
+                    }
+                }
+            }
+        }
+
+        private bool nearZone = false;
+
+        private void RunActiveDrone()
+        {
+            outText += "Locked on target " + aiTarget.Name + "\n";
+
+            if (frame % 2 == 0)
+                ActiveDroneFrame2();
+
+            Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(predictedTargetPos - centerOfGrid) : ctrlMatrix.Forward;
+            Vector3D moveTo = new Vector3D();
+
+            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
+            d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
+            d.DrawGPS("Stop Position", stopPosition);
+
+            if (fixedFlightArea)
+                nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+            else
+                nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+
+            // Autostop when near zone
+            if (nearZone)
+            {
+                antenna.HudText += " [ZONE]";
+                
+                ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+            }
+
+            else
+            {
+                switch (mode)
+                {
+                    case 0: // Orbit Enemy
+
+                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
+                        moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+
+                        // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
+                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        closestCollision = CheckCollision(moveTo);
+
+                        if (closestCollision != new Vector3D())
+                            moveTo += moveTo.Cross(closestCollision);
+                        break;
+
+                    case 1: // Orbit Controller
+
+                        double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
+
+                        if (!healMode && damageAmmo != "")
+                        {
+                            d.PrintHUD($"Damage ammo {damageAmmo}");
+                            foreach (var wep in fixedGuns)
+                            {
+                                if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
+                                    break;
+                                wep.SetValue<Int64>("WC_PickAmmo", 0);
+                            }
+                        }
+
+                        if (dSq > formDistance * formDistance * 4 || healMode)
+                            vecToEnemy = Vector3D.Normalize(controllerPos - centerOfGrid);
+
+
+                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
+                        // Prevents flipping when controllerFwd is negative
+                        //moveTo = controllerPos + Vector3D.Rotate(controllerFwd.Sum > 0 ? formationPresets[formation][id] : -formationPresets[formation][id], MatrixD.CreateFromDir(controllerFwd));
+                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+
+                        // Check if controller is in the way. If so, avoid
+                        //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
+
+                        d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        d.DrawGPS("Drone Position", moveTo);
+
+                        closestCollision = CheckCollision(moveTo);
+
+                        if (closestCollision != new Vector3D())
+                            moveTo += moveTo.Cross(closestCollision);
+                        break;
+
+                    case 2: // Sit and Fortify
+
+                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
+
+                        moveTo = controllerPos + formationPresets[formation][id];
+
+                        closestCollision = CheckCollision(moveTo);
+
+                        if (closestCollision != new Vector3D())
+                            moveTo += moveTo.Cross(closestCollision);
+                        break;
+                }
+
+                if (fixedFlightArea) 
+                    moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
+                else
+                    moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
+
+                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+            }
+        }
+
+        private void PrintDebugText()
+        {
+            outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs}ms\n";
+            if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
+            if (frame % 4 == 0)
+            {
+
+                if (!isController)
+                    IGC.SendBroadcastMessage("per", Runtime.LastRunTimeMs);
+                else
+                {
+                    if (totalRuntime != Runtime.LastRunTimeMs)
+                    {
+                        totalRuntime = 0;
+                        totalRuntime += Runtime.LastRunTimeMs;
+                    }
+                }
+            }
+
+            Echo(outText);
         }
 
         public bool IGCHandler(UpdateType updateSource)
@@ -636,13 +967,6 @@ namespace IngameScript
                 while (performanceListener.HasPendingMessage)
                 {
                     totalRuntime += performanceListener.AcceptMessage().As<double>();
-                    wasMessageRecieved = true;
-                }
-
-                while (dronePosListener.HasPendingMessage)
-                {
-                    MyIGCMessage m = dronePosListener.AcceptMessage();
-                    dronePositions[m.Source] = m.As<BoundingBoxD>();
                     wasMessageRecieved = true;
                 }
             }
@@ -720,7 +1044,7 @@ namespace IngameScript
             if ((mode == 1) && frame % 2 == 0)
             {
                 MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
-                //d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
+                d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
 
                 if (rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, (frame / rotateDividend % 360) / 57.2957795f);
@@ -776,7 +1100,7 @@ namespace IngameScript
 
         public void CCRPHandler()
         {
-            if (healController)
+            if (healMode)
             {
                 outText += "Locked on controller\n";
 
@@ -784,7 +1108,7 @@ namespace IngameScript
 
                 foreach (var weapon in fixedGuns)
                 {
-                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
                     if (isLinedUp && wAPI.IsWeaponReadyToFire(weapon))
                     {
                         if (!weapon.GetValueBool("WC_Shoot"))
@@ -819,9 +1143,9 @@ namespace IngameScript
                     BoundingBoxD box = aiTarget.BoundingBox.Translate(predictedTargetPos - aiTarget.Position);
                     bool isLinedUp = box.Intersects(ref weaponRay);
 
-                    //d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
-                    //d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
-                    //d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
+                    d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
+                    d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
 
                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
                     float r = wAPI.GetMaxWeaponRange(weapon, 0);
@@ -829,6 +1153,29 @@ namespace IngameScript
                     Fire(weapon, isLinedUp && r * r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon));
                 }
             }
+        }
+
+        List<IMyTerminalBlock> usedFlares = new List<IMyTerminalBlock>();
+        private void AutoFlareHandler()
+        {
+            // wait 5s between flares
+            if (projectilesLockedOn.Item2 >= missilesToFlare && projectilesLockedOn.Item3 > minMissileAge)
+            {
+                foreach (var f in flares)
+                {
+                    if (wAPI.IsWeaponReadyToFire(f))
+                    {
+                        wAPI.FireWeaponOnce(f);
+                        usedFlares.Add(f);
+                        break;
+                    }
+                }
+            }
+
+            foreach (var f in usedFlares)
+                flares.Remove(f);
+
+            usedFlares.Clear();
         }
 
         void Fire(IMyTerminalBlock weapon, bool enabled)
@@ -846,316 +1193,15 @@ namespace IngameScript
             }
         }
 
-        int errorCounter = 0;
-        public void Main(string argument, UpdateType updateSource)
-        {
-            // Prevents running multiple times per tick
-            if (updateSource == UpdateType.IGC)
-                return;
-
-            //d.RemoveAll();
-
-            if (!canRun) // If unable to init WC api, do not run.
-            {
-                Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
-
-                frame++;
-                if (frame >= 10)
-                    Init();
-                return;
-            }
-            else if ((!isController || mode == 1) && !activated) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
-                Runtime.UpdateFrequency = UpdateFrequency.Update100;
-
-            if (IGCHandler(updateSource))
-                lastControllerPing = DateTime.Now.Ticks;
-
-            try
-            {
-                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
-            }
-            catch { }
-
-            // Status info
-            outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
-            
-            //if (!isController)
-                //d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
-
-            // If ID unset and is not controller, ping controller for ID.
-            if (id == -1 && !isController)
-            {
-                activated = false;
-                IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
-                return;
-            }
-
-            if (activated) // Generic "I'm on!" stuff
-            {
-                try
-                {
-                    // Share World Axis-Aligned Bounding Box for collision avoidance
-                    IGC.SendBroadcastMessage("dpos", Me.CubeGrid.WorldAABB);
-
-                    centerOfGrid = Me.CubeGrid.GetPosition();
-
-                    aiTarget = wAPI.GetAiFocus(gridId).Value;
-
-
-                    outText += "Velocity " + speed + "\n";
-
-                    if (frame % 60 == 0)
-                    {
-                        speed = Me.CubeGrid.LinearVelocity.Length();
-
-                        AutoFortify();
-
-                        AutoIntegrity();
-
-                        // Revengance status
-                        if (!isController && !(mode == 0 && autoTarget) && !healController) // If drone and hasn't already gone ballistic
-                        {
-                            if (DateTime.Now.Ticks - lastControllerPing > 100000000) // If hasn't recieved message within 10 seconds
-                            {
-                                mode = 0;          // Go into freeflight mode
-                                autoTarget = true; // Automatically attack the nearest enemy
-                                antenna.HudText = new Random().NextDouble() > 0.5 ? "[ANGERY]" : "IT'S JOEVER"; // Ree at the enemy
-                            }
-                        }
-                    }
-
-                    if (isController) // If on AND is controller, Update drones with new instructions/positions
-                    {
-                        IGCSendHandler();
-                    }
-
-                    else // If on AND is drone
-                    {
-                        RunActiveDrone();
-                    }
-
-                    errorCounter = 0;
-                }
-
-                catch (Exception e)
-                {
-                    if (errorCounter > 10)
-                    {
-                        if (antenna != null)
-                            antenna.HudText += " [CRASHED]";
-                        throw e;
-                    }
-
-                    Me.GetSurface(0).WriteText(e.ToString());
-
-                    errorCounter++;
-                }
-            }
-
-            if (debug) // Print runtime info
-                PrintDebugText();
-
-            foreach (var l in outLcds)
-                l.WriteText(outText);
-
-            outText = "";
-
-            frame++;
-        }
-
-        private void ActiveDroneFrame2()
-        {
-            // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
-            if (!healController && (mode == 0 || autoTarget) && frame % 60 == 0)
-                wAPI.SetAiFocus(Me, GetClosestTarget());
-
-            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : aiTarget.Position;
-
-            if (doCcrp)
-                CCRPHandler();
-            else
-                outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
-
-            if (frame % 60 == 0)
-            {
-                // turn off guns if target is missing
-                if (aiTarget.IsEmpty())
-                    foreach (var weapon in fixedGuns)
-                        Fire(weapon, false);
-
-                bool needsRecalc = false;
-                // check if any thrusters are dead
-                foreach (var t in allThrust)
-                {
-                    if (t.WorldAABB == new BoundingBoxD())
-                    {
-                        needsRecalc = true;
-                        break;
-                    }
-                }
-                if (needsRecalc)
-                {
-                    GridTerminalSystem.GetBlocksOfType(allThrust);
-                    RecalcThrust();
-                    outText += $"Recalculated thrust with {allThrust.Count} thrusters";
-                }
-            }
-        }
-
-        private bool nearZone = false;
-
-        private void RunActiveDrone()
-        {
-            outText += "Locked on target " + aiTarget.Name + "\n";
-
-            if (frame % 2 == 0)
-                ActiveDroneFrame2();
-
-            Vector3D vecToEnemy = doCcrp && !resultPos.IsZero() ? Vector3D.Normalize(predictedTargetPos - centerOfGrid) : ctrlMatrix.Forward;
-            Vector3D moveTo = new Vector3D();
-
-            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-            //d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
-            //d.DrawGPS("Stop Position", stopPosition);
-
-            if (fixedFlightArea)
-                nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-            else
-                nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-
-            // Autostop when near zone
-            if (nearZone)
-            {
-                antenna.HudText += " [ZONE]";
-                
-                ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
-            }
-
-            else
-            {
-                switch (mode)
-                {
-                    case 0: // Orbit Enemy
-
-                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
-                        moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
-
-                        // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
-                        //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                        closestCollision = CheckCollision(moveTo);
-
-                        if (closestCollision != new Vector3D())
-                            moveTo += moveTo.Cross(closestCollision);
-                        break;
-
-                    case 1: // Orbit Controller
-
-                        double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
-
-                        if (!healController && damageAmmo != "")
-                        {
-                            //d.PrintHUD($"Damage ammo {damageAmmo}");
-                            foreach (var wep in fixedGuns)
-                            {
-                                if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
-                                    break;
-                                wep.SetValue<Int64>("WC_PickAmmo", 0);
-                            }
-                        }
-
-                        if (dSq > formDistance * formDistance * 4 || healController)
-                            vecToEnemy = Vector3D.Normalize(controllerPos - centerOfGrid);
-
-
-                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
-                        // Prevents flipping when controllerFwd is negative
-                        //moveTo = controllerPos + Vector3D.Rotate(controllerFwd.Sum > 0 ? formationPresets[formation][id] : -formationPresets[formation][id], MatrixD.CreateFromDir(controllerFwd));
-                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-
-                        // Check if controller is in the way. If so, avoid
-                        //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
-
-                        //d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                        //d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                        //d.DrawGPS("Drone Position", moveTo);
-
-                        closestCollision = CheckCollision(moveTo);
-
-                        if (closestCollision != new Vector3D())
-                            moveTo += moveTo.Cross(closestCollision);
-                        break;
-
-                    case 2: // Sit and Fortify
-
-                        gyros.FaceVectors(vecToEnemy, Me.WorldMatrix.Up);
-
-                        moveTo = controllerPos + formationPresets[formation][id];
-
-                        closestCollision = CheckCollision(moveTo);
-
-                        if (closestCollision != new Vector3D())
-                            moveTo += moveTo.Cross(closestCollision);
-                        break;
-                }
-
-                if (fixedFlightArea) 
-                    moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
-                else
-                    moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
-
-                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
-            }
-        }
-
-        private void PrintDebugText()
-        {
-            outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs}ms\n";
-            if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
-            if (frame % 4 == 0)
-            {
-
-                if (!isController)
-                    IGC.SendBroadcastMessage("per", Runtime.LastRunTimeMs);
-                else
-                {
-                    if (totalRuntime != Runtime.LastRunTimeMs)
-                    {
-                        totalRuntime = 0;
-                        totalRuntime += Runtime.LastRunTimeMs;
-                    }
-                }
-            }
-
-            Echo(outText);
-        }
-
-        MyDetectedEntityInfo? bufferMadarInfo = new MyDetectedEntityInfo();
-
         public Vector3D CheckCollision(Vector3D stopPosition)
         {
-            // holy mother of jank
-            //foreach (var m in madars)
-            //{
-            //    bufferMadarInfo = wAPI.GetWeaponTarget(m, 22);
-            //    if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
-            //        dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
-            //
-            //    bufferMadarInfo = wAPI.GetWeaponTarget(m, 23);
-            //    if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
-            //        dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
-            //
-            //    bufferMadarInfo = wAPI.GetWeaponTarget(m, 24);
-            //    if (bufferMadarInfo.HasValue && !dronePositions.ContainsKey(bufferMadarInfo.Value.EntityId))
-            //        dronePositions.Add(bufferMadarInfo.Value.EntityId, bufferMadarInfo.Value.BoundingBox);
-            //}
-
             LineD r = new LineD(Me.CubeGrid.GetPosition(), stopPosition);
 
-            foreach (var p in dronePositions.Values)
+            foreach (var p in friendlies)
             {
-                if (p.Intersects(ref r))
+                if (p.BoundingBox.Intersects(ref r))
                 {
-                    return p.Center;
+                    return p.Position;
                 }
             }
             return new Vector3D();
@@ -1170,21 +1216,21 @@ namespace IngameScript
             {
                 case "main":
                     mode = 0;
-                    healController = false;
+                    healMode = false;
                     if (isController)
                         SendGroupMsg<String>("main", false);
                     antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "wing":
                     mode = 1;
-                    healController = false;
+                    healMode = false;
                     if (isController)
                         SendGroupMsg<String>("wing", false);
                     antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "fort":
                     mode = 2;
-                    healController = false;
+                    healMode = false;
                     if (isController)
                     {
                         SendGroupMsg<String>("fort", false);
@@ -1240,13 +1286,13 @@ namespace IngameScript
                     }
                     else
                     {
-                        if (healAmmo != "") healController = true;
+                        if (healAmmo != "") healMode = true;
                         else return;
                         wAPI.SetAiFocus(Me, controlID);
-                        //d.PrintHUD($"Healing ammo {healAmmo}");
+                        d.PrintHUD($"Healing ammo {healAmmo}");
                         foreach (var wep in fixedGuns)
                         {
-                            wep.SetValue<Int64>("WC_PickAmmo", 1);
+                            wep.SetValue<long>("WC_PickAmmo", 1);
                         }
                     }
                     return;
