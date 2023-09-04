@@ -1,4 +1,5 @@
-﻿using Sandbox.Game.EntityComponents;
+﻿using CoreSystems.Api;
+using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
@@ -397,28 +398,42 @@ namespace IngameScript
 
         public Program()
         {
+            TryInit();
+
+            if (isController)
+                SendGroupMsg<String>("stop", true);
+        }
+
+        public void Save()
+        {
+            canRun = false;
+            frame = 0;
+        }
+
+        public void TryInit()
+        {
             try
             {
                 Init();
             }
             catch (Exception e)
             {
-                Echo("[color=#FFFF0000] !!! If you can see this, you're probably missing something important (i.e. antenna) !!! [/color]");
+                Echo("[color=#FFFF0000] !!! If you can see this, you're missing something important !!! [/color]");
                 Echo(e.Message);
             }
-
-            if (isController)
-                SendGroupMsg<String>("stop", true);
         }
 
-        public void Init()
+        void Init()
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
             // Init Weaponcore API
+
             wAPI = new WcPbApi();
             canRun = wAPI.Activate(Me);
-            if (!canRun) return;
+            if (!canRun)
+                throw new Exception("WcPbAPI failed to init!");
+
             Echo("Initialized wAPI");
 
             // Init Defense Shields API
@@ -624,7 +639,7 @@ namespace IngameScript
             gridId = Me.CubeGrid.EntityId;
             frame = 0;
 
-            Echo("[color=#FF00FF00]\nSuccessfully initialized as a [/color]" + (isController ? "controller." : "drone."));
+            Echo("[color=#FF00FF00]\nSuccessfully initialized as a " + (isController ? "controller." : "drone.") + "[/color]");
         }
 
 
@@ -635,20 +650,21 @@ namespace IngameScript
             if (updateSource == UpdateType.IGC)
                 return;
 
-            d.RemoveAll();
-
             if (!canRun) // If unable to init WC api, do not run.
             {
-                Echo("[color=#FFFF0000]UNABLE TO RUN! Make sure Weaponcore is enabled.[/color]");
-
                 frame++;
-                if (frame >= 10)
-                    Init();
+                if (frame <= 10)
+                    TryInit();
                 return;
             }
-            else if ((!isController || mode == 1) && !activated) // Controller doesn't need to be running constantly, unless in wingman mode. That was a lie to children. Actually it wasn't. AAAAHHHHHHH.
+            else if ((!isController || mode == 1) && !activated) // Controller doesn't need to be running constantly, unless in wingman mode.
+            {
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
+            }
 
+            d.RemoveAll();
+
+            // Update last controller ping
             if (IGCHandler(updateSource))
                 lastControllerPing = DateTime.Now.Ticks;
 
