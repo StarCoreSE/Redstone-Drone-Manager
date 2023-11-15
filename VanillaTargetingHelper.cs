@@ -19,7 +19,32 @@ namespace IngameScript
             program.Echo("VANILLA!!!");
         }
 
-        public override MyDetectedEntityInfo? GetClosestTarget()
+        public override long GetClosestTarget()
+        {
+            throw new Exception();
+        }
+
+        public override void GetTargets()
+        {
+            throw new Exception();
+        }
+
+        public override void FireWeapon(IMyTerminalBlock weapon, bool enabled)
+        {
+            throw new Exception();
+        }
+
+        public override void FireWeapon(IMyTerminalBlock weapon)
+        {
+            throw new Exception();
+        }
+
+        public override float MaxRange(IMyTerminalBlock weapon)
+        {
+            throw new Exception();
+        }
+
+        public override bool WeaponReady(IMyTerminalBlock weapon)
         {
             throw new Exception();
         }
