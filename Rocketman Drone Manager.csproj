@@ -49,6 +49,9 @@
     <AdditionalFiles Include="Instructions.readme" />
     <AdditionalFiles Include="thumb.png" />
     <AdditionalFiles Include="MDK\whitelist.cache" />
+    <Compile Include="TargetingHelper.cs" />
+    <Compile Include="VanillaTargetingHelper.cs" />
+    <Compile Include="WCTargetingHelper.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />

@@ -25,7 +25,7 @@ namespace IngameScript
     {
         #region mdk preserve
 
-        // Updated 7/30/23 //
+        // Updated 11/14/23 //
 
 
 
@@ -52,7 +52,7 @@ namespace IngameScript
         bool rotate = true;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
-        float rotateDividend = 6;
+        float orbitsPerSecond = 6;
 
         // How far (in meters) drones in formation should be from the controller. Default [250]
         static int formDistance = 250;
@@ -93,7 +93,7 @@ namespace IngameScript
 
         // If true, remain within [zoneRadius] of world origin. If false, remain within [zoneRadius] of controller. Default [true]
         //do you know what that is? if not set to false, also uh, starcore.tv you should check it out -thecrystalwoods
-        bool fixedFlightArea = true;
+        bool fixedFlightArea = false;
 
         // Radius of the harm zone. this is in meters, not km.
         // if not starcore, this is the size of the leash (aka how far the drone should go outfrom the controlling grid, SET THIS SMALLER JESUS FUCK, or don't, i'm not your fucking mom - thecrystalwoods
@@ -234,7 +234,9 @@ namespace IngameScript
 
         MyTuple<bool, int, int> projectilesLockedOn = new MyTuple<bool, int, int>(false, 0, -1);
 
-        string outText = ""; // Text buffer to avoid lag:tm:
+        public string outText = ""; // Text buffer to avoid lag:tm:
+
+        public long gridId = 0;
 
         #region drone-specific
 
@@ -401,7 +403,7 @@ namespace IngameScript
             TryInit();
 
             if (isController)
-                SendGroupMsg<String>("stop", true);
+                SendGroupMsg<string>("stop", true);
         }
 
         public void Save()
@@ -419,7 +421,7 @@ namespace IngameScript
             catch (Exception e)
             {
                 Echo("[color=#FFFF0000] !!! If you can see this, you're missing something important !!! [/color]");
-                Echo(e.Message);
+                throw e;
             }
         }
 
@@ -463,9 +465,8 @@ namespace IngameScript
             Echo($"Checked customdata for group ({group})");
 
             // Init Whip's GPS Gyro Control
-            gridSystem = GridTerminalSystem;
             gridId = Me.CubeGrid.EntityId;
-            gyros = new GyroControl(Me, kP, kI, kD, lowerBound, upperBound, timeStep);
+            gyros = new GyroControl(this, Me, kP, kI, kD, lowerBound, upperBound, timeStep);
             Echo("Initialized Whip's Gyro Control");
 
             // Get cockpit for controller
@@ -603,9 +604,9 @@ namespace IngameScript
 
             if (isController)
             {
-                SendGroupMsg<String>("r", true); // Reset drone IDs
-                SendGroupMsg<String>("m" + mainDistance, true);
-                SendGroupMsg<String>("o" + formDistance, true);
+                SendGroupMsg<string>("r", true); // Reset drone IDs
+                SendGroupMsg<string>("m" + mainDistance, true);
+                SendGroupMsg<string>("o" + formDistance, true);
                 Echo("Reset drone IDs and shared formation distances");
             }
 
@@ -1053,7 +1054,7 @@ namespace IngameScript
 
                 if (frame % 240 == 0)
                 {
-                    SendGroupMsg<String>("c" + Me.CubeGrid.EntityId, true);
+                    SendGroupMsg<string>("c" + Me.CubeGrid.EntityId, true);
                 }
             }
 
@@ -1063,7 +1064,7 @@ namespace IngameScript
                 d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
 
                 if (rotate)
-                    m *= Matrix.CreateFromAxisAngle(m.Forward, (frame / rotateDividend % 360) / 57.2957795f);
+                    m *= Matrix.CreateFromAxisAngle(m.Forward, orbitsPerSecond % 360 / frame / 57.2957795f);
 
                 if (multipleControllers)
                 {
@@ -1234,14 +1235,14 @@ namespace IngameScript
                     mode = 0;
                     healMode = false;
                     if (isController)
-                        SendGroupMsg<String>("main", false);
+                        SendGroupMsg<string>("main", false);
                     antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "wing":
                     mode = 1;
                     healMode = false;
                     if (isController)
-                        SendGroupMsg<String>("wing", false);
+                        SendGroupMsg<string>("wing", false);
                     antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     return;
                 case "fort":
@@ -1249,7 +1250,7 @@ namespace IngameScript
                     healMode = false;
                     if (isController)
                     {
-                        SendGroupMsg<String>("fort", false);
+                        SendGroupMsg<string>("fort", false);
                         IGC.SendBroadcastMessage("pos", centerOfGrid);
                         MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
                         
@@ -1266,7 +1267,7 @@ namespace IngameScript
                     {
                         if (updateSource != UpdateType.IGC)
                         {
-                            SendGroupMsg<String>("start", true);
+                            SendGroupMsg<string>("start", true);
                             IGC.SendBroadcastMessage("-1", "start");
                         }
                         IGC.SendBroadcastMessage("pos", centerOfGrid);
@@ -1289,7 +1290,7 @@ namespace IngameScript
                     }
                     if (isController && updateSource != UpdateType.IGC)
                     {
-                        SendGroupMsg<String>("stop", true);
+                        SendGroupMsg<string>("stop", true);
                         IGC.SendBroadcastMessage("-1", "stop");
                     }
                     return;
@@ -1298,7 +1299,7 @@ namespace IngameScript
 
                     if (isController)
                     {
-                        SendGroupMsg<String>("heal", false);
+                        SendGroupMsg<string>("heal", false);
                     }
                     else
                     {
@@ -1341,7 +1342,7 @@ namespace IngameScript
                 if (argument.Substring(0, 4) == "form")
                 {
                     int.TryParse(argument.Substring(4), out formation);
-                    SendGroupMsg<String>("f" + formation.ToString(), false);
+                    SendGroupMsg<string>("f" + formation.ToString(), false);
                 }
             }
             
@@ -1369,7 +1370,7 @@ namespace IngameScript
                         if (!droneEntities.Contains(tId)) droneEntities.Add(tId);
                         for (int i = 0; i < droneEntities.Count; i++)
                         {
-                            SendGroupMsg<String>("i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + droneEntities[i], true); // Send message in format: i04EntityId
+                            SendGroupMsg<string>("i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + droneEntities[i], true); // Send message in format: i04EntityId
                         }
                         antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     }
@@ -1619,56 +1620,5 @@ namespace IngameScript
             }
             return runIndicator;
         }
-
-
-        #region Whip's Gyro Control
-
-        static IMyGridTerminalSystem gridSystem;
-        static long gridId;
-
-        public static T GetBlock<T>(string name, bool useSubgrids = false) where T : class, IMyTerminalBlock
-        {
-            if (useSubgrids)
-            {
-                return (T)gridSystem.GetBlockWithName(name);
-            }
-            else
-            {
-                List<T> blocks = GetBlocks<T>(false);
-                foreach (T block in blocks)
-                {
-                    if (block.CustomName == name)
-                        return block;
-                }
-                return null;
-            }
-        }
-        public static T GetBlock<T>(bool useSubgrids = false) where T : class, IMyTerminalBlock
-        {
-            List<T> blocks = GetBlocks<T>(useSubgrids);
-            return blocks.FirstOrDefault();
-        }
-        public static List<T> GetBlocks<T>(string groupName, bool useSubgrids = false) where T : class, IMyTerminalBlock
-        {
-            if (string.IsNullOrWhiteSpace(groupName))
-                return GetBlocks<T>(useSubgrids);
-
-            IMyBlockGroup group = gridSystem.GetBlockGroupWithName(groupName);
-            List<T> blocks = new List<T>();
-            group.GetBlocksOfType(blocks);
-            if (!useSubgrids)
-                blocks.RemoveAll(block => block.CubeGrid.EntityId != gridId);
-            return blocks;
-
-        }
-        public static List<T> GetBlocks<T>(bool useSubgrids = false) where T : class, IMyTerminalBlock
-        {
-            List<T> blocks = new List<T>();
-            gridSystem.GetBlocksOfType(blocks);
-            if (!useSubgrids)
-                blocks.RemoveAll(block => block.CubeGrid.EntityId != gridId);
-            return blocks;
-        }
-        #endregion
     }
 }
