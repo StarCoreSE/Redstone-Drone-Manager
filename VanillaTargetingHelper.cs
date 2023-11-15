@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using VRageMath;
 
 namespace IngameScript
 {
@@ -39,12 +40,22 @@ namespace IngameScript
             throw new Exception();
         }
 
-        public override float MaxRange(IMyTerminalBlock weapon)
+        public override float GetMaxRange(IMyTerminalBlock weapon)
         {
             throw new Exception();
         }
 
-        public override bool WeaponReady(IMyTerminalBlock weapon)
+        public override bool GetWeaponReady(IMyTerminalBlock weapon)
+        {
+            throw new Exception();
+        }
+
+        public override void GetObstructions(List<MyDetectedEntityInfo> obstructions)
+        {
+            throw new Exception();
+        }
+
+        public override Vector3D? GetPredictedPosition(IMyTerminalBlock weapon, long entityId)
         {
             throw new Exception();
         }

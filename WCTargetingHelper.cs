@@ -12,8 +12,8 @@ namespace IngameScript
 {
     internal class WCTargetingHelper : TargetingHelper
     {
-        readonly WcPbApi wAPI = new WcPbApi();
-        readonly bool canRun;
+        public readonly WcPbApi wAPI = new WcPbApi();
+        private bool canRun;
 
         public WCTargetingHelper(Program program) : base(program)
         {
@@ -23,20 +23,29 @@ namespace IngameScript
             wepCheck = new Func<IMyTerminalBlock, bool>(w => wAPI.HasCoreWeapon(w));
         }
 
+        int frame = 0;
         public override void Update()
         {
-            if (!canRun)
+            if (!canRun) // If unable to init WC api, do not run.
+            {
+                frame++;
+                if (frame <= 10)
+                {
+                    canRun = wAPI.Activate(program.Me);
+                    wepCheck = new Func<IMyTerminalBlock, bool>(w => wAPI.HasCoreWeapon(w));
+                }
                 return;
+            }
             base.Update();
 
-            target = wAPI.GetAiFocus(program.gridId);
+            Target = wAPI.GetAiFocus(program.gridId).GetValueOrDefault();
         }
 
         public override void GetTargets()
         {
             Dictionary<MyDetectedEntityInfo, float> t = new Dictionary<MyDetectedEntityInfo, float>();
             wAPI.GetSortedThreats(program.Me, t);
-            targets = t.Keys.ToArray();
+            Targets = t.Keys.ToArray();
         }
 
         public override void SetTarget(MyDetectedEntityInfo target)
@@ -59,14 +68,24 @@ namespace IngameScript
                 weapon.SetValueBool("WC_Shoot", false);
         }
 
-        public override float MaxRange(IMyTerminalBlock weapon)
+        public override float GetMaxRange(IMyTerminalBlock weapon)
         {
             return wAPI.GetMaxWeaponRange(weapon, 0);
         }
 
-        public override bool WeaponReady(IMyTerminalBlock weapon)
+        public override bool GetWeaponReady(IMyTerminalBlock weapon)
         {
             return wAPI.IsWeaponReadyToFire(weapon);
+        }
+
+        public override void GetObstructions(List<MyDetectedEntityInfo> obstructions)
+        {
+            wAPI.GetObstructions(program.Me, obstructions);
+        }
+
+        public override Vector3D? GetPredictedPosition(IMyTerminalBlock weapon, long entityId)
+        {
+            return wAPI.GetPredictedTargetPosition(weapon, entityId, 0);
         }
     }
 }

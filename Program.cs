@@ -1,4 +1,7 @@
-﻿using CoreSystems.Api;
+﻿//#define debug
+// YOU SEE THAT, NERD? IT'S FOR THE DEBUG API!
+
+using CoreSystems.Api;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
@@ -61,7 +64,7 @@ namespace IngameScript
         int mainDistance = 1000;
 
         // Toggles debug mode. Outputs performance, but increases performance cost. Default [250]
-        bool debug = false;
+        bool debug = true;
 
 
         /* DRONE SETTINGS */
@@ -77,10 +80,10 @@ namespace IngameScript
         double maxOffset = 2;
 
         // Name of the terminal group containing the drone's fixed guns.
-        string gunGroup = "Main";
+        string gunGroupName = "Main";
 
         // Name of the terminal group containing the drone's afterburners. Make sure it's balanced!
-        string abGroup = "Afterburners";
+        string abGroupName = "Afterburners";
 
         // Name of the terminal group containing the drone's flares. Currently only supports single-use flares.
         string flareGroupName = "Flares";
@@ -205,10 +208,11 @@ namespace IngameScript
         char runIndicator = '|';
 
         PbApiWrapper dAPI;
-        WcPbApi wAPI;
+        TargetingHelper targeting;
+        #if debug
         DebugAPI d;
+        #endif
 
-        bool canRun = false; // is weaponcore activated?
         bool activated = false; // have I been told to move?
 
         Vector3D centerOfGrid = new Vector3D(); // Me.position
@@ -408,7 +412,6 @@ namespace IngameScript
 
         public void Save()
         {
-            canRun = false;
             frame = 0;
         }
 
@@ -429,22 +432,22 @@ namespace IngameScript
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
-            // Init Weaponcore API
-
-            wAPI = new WcPbApi();
-            canRun = wAPI.Activate(Me);
-            if (!canRun)
-                throw new Exception("WcPbAPI failed to init!");
-
-            Echo("Initialized wAPI");
+            // Init Targeting class
+            if (TargetingHelper.WcPbApiExists(Me))
+                targeting = new WCTargetingHelper(this);
+            else
+                targeting = new VanillaTargetingHelper(this);
+            Echo("Initialized Targeting");
 
             // Init Defense Shields API
             dAPI = new PbApiWrapper(Me);
             Echo("Initialized dsAPI");
 
             // Init Debug Draw API
+#if debug
             d = new DebugAPI(this);
             Echo("Initialized debugAPI");
+#endif
 
             // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneRadius *= zoneRadius;
@@ -530,7 +533,7 @@ namespace IngameScript
             // Get fixed guns
             try
             {
-                GridTerminalSystem.GetBlockGroupWithName(gunGroup).GetBlocksOfType<IMyTerminalBlock>(fixedGuns, b => wAPI.HasCoreWeapon(b));
+                targeting.GetWeapons(fixedGuns, gunGroupName);
             }
             catch
             {
@@ -559,7 +562,7 @@ namespace IngameScript
             // Get afterburners
             try
             {
-                GridTerminalSystem.GetBlockGroupWithName(abGroup).GetBlocksOfType<IMyTerminalBlock>(allABs, b => wAPI.HasCoreWeapon(b));
+                targeting.GetWeapons(allABs, abGroupName);
             }
             catch
             {
@@ -623,7 +626,7 @@ namespace IngameScript
             // Cache flares for later use
             try
             {
-                GridTerminalSystem.GetBlockGroupWithName(flareGroupName).GetBlocksOfType(flares, b => wAPI.HasCoreWeapon(b));
+                targeting.GetWeapons(flares, flareGroupName);
             }
             catch
             {
@@ -651,19 +654,14 @@ namespace IngameScript
             if (updateSource == UpdateType.IGC)
                 return;
 
-            if (!canRun) // If unable to init WC api, do not run.
-            {
-                frame++;
-                if (frame <= 10)
-                    TryInit();
-                return;
-            }
             else if ((!isController || mode == 1) && !activated) // Controller doesn't need to be running constantly, unless in wingman mode.
             {
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
             }
 
+            #if debug
             d.RemoveAll();
+            #endif
 
             // Update last controller ping
             if (IGCHandler(updateSource))
@@ -677,8 +675,10 @@ namespace IngameScript
 
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
-            
-            d.PrintHUD(RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
+
+            #if debug
+            d.PrintHUD(Me.CubeGrid.CustomName + ": " + RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
+            #endif
 
             // If ID unset and is not controller, ping controller for ID.
             if (id == -1 && !isController)
@@ -694,12 +694,13 @@ namespace IngameScript
                 {
                     centerOfGrid = Me.CubeGrid.GetPosition();
 
+                    Echo("1");
                     if (!healMode)
-                        aiTarget = wAPI.GetAiFocus(gridId).Value;
+                        aiTarget = targeting.Target;
 
 
                     outText += "Velocity " + speed + "\n";
-
+                    Echo("2");
                     if (frame % 60 == 0)
                     {
                         speed = Me.CubeGrid.LinearVelocity.Length();
@@ -708,20 +709,23 @@ namespace IngameScript
                         
                         AutoIntegrity();
                     }
-
+                    Echo("3");
                     if (isController) // If on AND is controller, Update drones with new instructions/positions
                     {
+                        Echo("3.5");
                         IGCSendHandler();
                     }
 
                     else // If on AND is drone
                     {
+                        Echo("4.-5");
                         RunActiveDrone();
                     }
 
                     errorCounter = 0;
+                    Echo("4");
                 }
-
+                // Scary error handling
                 catch (Exception e)
                 {
                     if (errorCounter > 10)
@@ -757,7 +761,7 @@ namespace IngameScript
             else
                 outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
 
-            wAPI.GetObstructions(Me, friendlies);
+            targeting.GetObstructions(friendlies);
 
             AutoFlareHandler();
 
@@ -765,7 +769,7 @@ namespace IngameScript
             {
                 // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
                 if (!healMode && (mode == 0 || autoTarget))
-                    wAPI.SetAiFocus(Me, GetClosestTarget());
+                    targeting.SetTarget(targeting.GetClosestTarget());
                 else if (healMode && autoTarget)
                     aiTarget = friendlies[0];
                 
@@ -818,8 +822,10 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
 
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
+#if debug
             d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
             d.DrawGPS("Stop Position", stopPosition);
+#endif
 
             if (fixedFlightArea)
                 nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
@@ -844,7 +850,9 @@ namespace IngameScript
                         moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
 
                         // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
+#if debug
                         d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+#endif
                         closestCollision = CheckCollision(moveTo);
 
                         if (closestCollision != new Vector3D())
@@ -855,12 +863,12 @@ namespace IngameScript
 
                         double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
 
-                        if (!healMode && damageAmmo != "")
+                        if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper)
                         {
-                            d.PrintHUD($"Damage ammo {damageAmmo}");
+                            WCTargetingHelper wCTargeting = (WCTargetingHelper) targeting;
                             foreach (var wep in fixedGuns)
                             {
-                                if (wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
+                                if (wCTargeting.wAPI.GetActiveAmmo(wep, 0) == damageAmmo)
                                     break;
                                 wep.SetValue<Int64>("WC_PickAmmo", 0);
                             }
@@ -878,9 +886,11 @@ namespace IngameScript
                         // Check if controller is in the way. If so, avoid
                         //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
 
+#if debug
                         d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
                         d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                         d.DrawGPS("Drone Position", moveTo);
+#endif
 
                         closestCollision = CheckCollision(moveTo);
 
@@ -944,7 +954,7 @@ namespace IngameScript
 
                     if (message.Data.GetType() == typeof(long) && !isController)
                     {
-                        wAPI.SetAiFocus(Me, message.As<long>());
+                        targeting.SetTarget(message.As<long>());
                     }
                     else if (message.Data.GetType() == typeof(Vector3D))
                         ctrlTargetPos = message.As<Vector3D>();
@@ -1044,13 +1054,13 @@ namespace IngameScript
 
         public void IGCSendHandler()
         {
-            if (wAPI.GetAiFocus(gridId).Value.EntityId != 0)
-                SendGroupMsg<Vector3D>(wAPI.GetAiFocus(gridId).Value.Position, false);
+            if (targeting.Target.EntityId != 0)
+                SendGroupMsg<Vector3D>(targeting.Target.Position, false);
 
             if (frame % 20 == 0)
             {
-                if (wAPI.GetAiFocus(gridId).Value.EntityId != 0)
-                    SendGroupMsg<long>(wAPI.GetAiFocus(gridId).Value.EntityId, !multipleControllers || group == 0);
+                if (targeting.Target.EntityId != 0)
+                    SendGroupMsg<long>(targeting.Target.EntityId, !multipleControllers || group == 0);
 
                 if (frame % 240 == 0)
                 {
@@ -1061,7 +1071,9 @@ namespace IngameScript
             if ((mode == 1) && frame % 2 == 0)
             {
                 MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
+                #if debug
                 d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
+                #endif
 
                 if (rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, orbitsPerSecond % 360 / frame / 57.2957795f);
@@ -1096,25 +1108,6 @@ namespace IngameScript
             }
         }
 
-        public long GetClosestTarget()
-        {
-            long target = 0;
-            Dictionary<MyDetectedEntityInfo, float> targets = new Dictionary<MyDetectedEntityInfo, float>();
-            wAPI.GetSortedThreats(Me, targets);
-
-            foreach (var targ in targets.Keys) // goofy ahh distance sorter
-            {
-                double dist2 = Vector3D.DistanceSquared(targ.Position, centerOfGrid);
-                if (dist2 < distanceTarget || distanceTarget == 0)
-                {
-                    distanceTarget = dist2;
-                    target = targ.EntityId;
-                }
-            }
-
-            return target;
-        }
-
         public void CCRPHandler()
         {
             if (healMode)
@@ -1125,8 +1118,10 @@ namespace IngameScript
 
                 foreach (var weapon in fixedGuns)
                 {
-                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, Color.White, 0.5f);
-                    if (isLinedUp && wAPI.IsWeaponReadyToFire(weapon))
+#if debug
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid, Color.White, 0.5f);
+#endif
+                    if (isLinedUp && targeting.GetWeaponReady(weapon))
                     {
                         if (!weapon.GetValueBool("WC_Shoot"))
                         {
@@ -1147,27 +1142,29 @@ namespace IngameScript
                     // See variable name
                     try
                     {
-                        predictedTargetPos = wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, 0).Value;
+                        predictedTargetPos = targeting.GetPredictedPosition(weapon, aiTarget.EntityId).Value;
                     }
                     catch
                     {
                         continue;
                     }
 
-                    LineD weaponRay = new LineD(Me.CubeGrid.GetPosition(), Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid);
+                    LineD weaponRay = new LineD(Me.CubeGrid.GetPosition(), Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid);
 
                     //bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) > maxOffset;
                     BoundingBoxD box = aiTarget.BoundingBox.Translate(predictedTargetPos - aiTarget.Position);
                     bool isLinedUp = box.Intersects(ref weaponRay);
 
+#if debug
                     d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
-                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * wAPI.GetMaxWeaponRange(weapon, 0) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
+                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
                     d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
+#endif
 
                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
-                    float r = wAPI.GetMaxWeaponRange(weapon, 0);
+                    float r = targeting.GetMaxRange(weapon);
 
-                    Fire(weapon, isLinedUp && r * r > distanceTarget && wAPI.IsWeaponReadyToFire(weapon));
+                    Fire(weapon, isLinedUp && r * r > distanceTarget && targeting.GetWeaponReady(weapon));
                 }
             }
         }
@@ -1178,12 +1175,12 @@ namespace IngameScript
             // wait 5s between flares
             if (projectilesLockedOn.Item2 >= missilesToFlare && projectilesLockedOn.Item3 > minMissileAge)
             {
-                foreach (var f in flares)
+                foreach (var flare in flares)
                 {
-                    if (wAPI.IsWeaponReadyToFire(f))
+                    if (targeting.GetWeaponReady(flare))
                     {
-                        wAPI.FireWeaponOnce(f);
-                        usedFlares.Add(f);
+                        targeting.FireWeapon(flare);
+                        usedFlares.Add(flare);
                         break;
                     }
                 }
@@ -1305,8 +1302,7 @@ namespace IngameScript
                     {
                         if (healAmmo != "") healMode = true;
                         else return;
-                        wAPI.SetAiFocus(Me, controlID);
-                        d.PrintHUD($"Healing ammo {healAmmo}");
+                        targeting.SetTarget(controlID);
                         foreach (var wep in fixedGuns)
                         {
                             wep.SetValue<long>("WC_PickAmmo", 1);
@@ -1314,20 +1310,32 @@ namespace IngameScript
                     }
                     return;
                 case "learnheal":
-                    foreach (var w in fixedGuns)
+                    if (targeting is WCTargetingHelper)
                     {
-                        healAmmo = wAPI.GetActiveAmmo(w, 0);
-                        if (damageAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
+                        WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
+                        foreach (var w in fixedGuns)
+                        {
+                            healAmmo = wcTargeting.wAPI.GetActiveAmmo(w, 0);
+                            if (damageAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
+                        }
+                        Echo("[color=#FF00FF00]Learned damage ammo [/color]" + healAmmo);
                     }
-                    Echo("[color=#FF00FF00]Learned damage ammo [/color]" + healAmmo);
+                    else
+                        Echo("[color=#FFFF0000]Weaponcore not active![/color]");
                     break;
                 case "learndamage":
-                    foreach (var w in fixedGuns)
+                    if (targeting is WCTargetingHelper)
                     {
-                        damageAmmo = wAPI.GetActiveAmmo(w, 0);
-                        if (healAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
+                        WCTargetingHelper wcTargeting = (WCTargetingHelper) targeting;
+                        foreach (var w in fixedGuns)
+                        {
+                            damageAmmo = wcTargeting.wAPI.GetActiveAmmo(w, 0);
+                            if (healAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
+                        }
+                        Echo("[color=#FF00FF00]Learned damage ammo [/color]" + damageAmmo);
                     }
-                    Echo("[color=#FF00FF00]Learned damage ammo [/color]" + damageAmmo);
+                    else
+                        Echo("[color=#FFFF0000]Weaponcore not active![/color]");
                     break;
                 case "ctrlgroup":
                     if (isController)
@@ -1467,12 +1475,13 @@ namespace IngameScript
             // TODO: If speed > 400, don't fire.
             if (hasABs && relPos.LengthSquared() > 10000)
             {
-                if (tMove.X > 0.25) foreach (var ab in leftAB) wAPI.FireWeaponOnce(ab);
-                if (-tMove.X > 0.25) foreach (var ab in rightAB) wAPI.FireWeaponOnce(ab);
-                if (tMove.Y > 0.25) foreach (var ab in forwardAB) wAPI.FireWeaponOnce(ab);
-                if (-tMove.Y > 0.25) foreach (var ab in backAB) wAPI.FireWeaponOnce(ab);
-                if (tMove.Z > 0.25) foreach (var ab in upAB) wAPI.FireWeaponOnce(ab);
-                if (-tMove.Z > 0.25) foreach (var ab in downAB) wAPI.FireWeaponOnce(ab);
+                
+                if (tMove.X > 0.25)  foreach (var ab in leftAB)    targeting.FireWeapon(ab);
+                if (-tMove.X > 0.25) foreach (var ab in rightAB)   targeting.FireWeapon(ab);
+                if (tMove.Y > 0.25)  foreach (var ab in forwardAB) targeting.FireWeapon(ab);
+                if (-tMove.Y > 0.25) foreach (var ab in backAB)    targeting.FireWeapon(ab);
+                if (tMove.Z > 0.25)  foreach (var ab in upAB)      targeting.FireWeapon(ab);
+                if (-tMove.Z > 0.25) foreach (var ab in downAB)    targeting.FireWeapon(ab);
             }
         }
         // AAAAAAARRRRRRRRRRRGGGGGGGGGGGGGGGHHHHHHHHHHHHHHHHHHHH
