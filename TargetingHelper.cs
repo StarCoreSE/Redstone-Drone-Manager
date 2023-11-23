@@ -44,7 +44,7 @@ namespace IngameScript
         {
             foreach (var target in Targets)
                 if (target.EntityId == targetId)
-                    Target = target;
+                    SetTarget(target);
         }
 
         public virtual long GetClosestTarget()

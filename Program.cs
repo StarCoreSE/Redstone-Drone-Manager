@@ -1,7 +1,4 @@
-﻿//#define debug
-// YOU SEE THAT, NERD? IT'S FOR THE DEBUG API!
-
-using CoreSystems.Api;
+﻿using CoreSystems.Api;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
@@ -209,9 +206,9 @@ namespace IngameScript
 
         PbApiWrapper dAPI;
         TargetingHelper targeting;
-        #if debug
+        
         DebugAPI d;
-        #endif
+        
 
         bool activated = false; // have I been told to move?
 
@@ -444,10 +441,10 @@ namespace IngameScript
             Echo("Initialized dsAPI");
 
             // Init Debug Draw API
-#if debug
+
             d = new DebugAPI(this);
             Echo("Initialized debugAPI");
-#endif
+
 
             // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneRadius *= zoneRadius;
@@ -659,9 +656,9 @@ namespace IngameScript
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
             }
 
-            #if debug
+            
             d.RemoveAll();
-            #endif
+            
 
             // Update last controller ping
             if (IGCHandler(updateSource))
@@ -676,9 +673,9 @@ namespace IngameScript
             // Status info
             outText += $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
 
-            #if debug
+            
             d.PrintHUD(Me.CubeGrid.CustomName + ": " + RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
-            #endif
+            
 
             // If ID unset and is not controller, ping controller for ID.
             if (id == -1 && !isController)
@@ -692,6 +689,9 @@ namespace IngameScript
             {
                 try
                 {
+                    // Update targeting helper
+                    targeting.Update();
+
                     centerOfGrid = Me.CubeGrid.GetPosition();
 
                     Echo("1");
@@ -813,7 +813,7 @@ namespace IngameScript
 
         private void RunActiveDrone()
         {
-            outText += "Locked on target " + aiTarget.Name + "\n";
+            outText += "Locked onto [" + aiTarget.Name + "]\n";
 
             if (frame % 2 == 0)
                 ActiveDroneFrame2();
@@ -822,10 +822,9 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
 
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-#if debug
+            
             d.DrawLine(centerOfGrid, resultPos, Color.Red, 0.1f);
             d.DrawGPS("Stop Position", stopPosition);
-#endif
 
             if (fixedFlightArea)
                 nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
@@ -850,9 +849,9 @@ namespace IngameScript
                         moveTo = aiTarget.Position + Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
 
                         // fucking ram the enemy, idc. they probably deserve it. murdered some cute baby kittens or whatever.
-#if debug
+
                         d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-#endif
+
                         closestCollision = CheckCollision(moveTo);
 
                         if (closestCollision != new Vector3D())
@@ -886,11 +885,11 @@ namespace IngameScript
                         // Check if controller is in the way. If so, avoid
                         //if (Vector3D.DistanceSquared(centerOfGrid, controllerPos) < Vector3D.DistanceSquared(centerOfGrid, moveTo)) moveTo += controllerFwd * formDistance;
 
-#if debug
+
                         d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
                         d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                         d.DrawGPS("Drone Position", moveTo);
-#endif
+
 
                         closestCollision = CheckCollision(moveTo);
 
@@ -1071,9 +1070,9 @@ namespace IngameScript
             if ((mode == 1) && frame % 2 == 0)
             {
                 MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
-                #if debug
+                
                 d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
-                #endif
+                
 
                 if (rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, orbitsPerSecond % 360 / frame / 57.2957795f);
@@ -1118,9 +1117,9 @@ namespace IngameScript
 
                 foreach (var weapon in fixedGuns)
                 {
-#if debug
+
                     d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid, Color.White, 0.5f);
-#endif
+
                     if (isLinedUp && targeting.GetWeaponReady(weapon))
                     {
                         if (!weapon.GetValueBool("WC_Shoot"))
@@ -1155,11 +1154,11 @@ namespace IngameScript
                     BoundingBoxD box = aiTarget.BoundingBox.Translate(predictedTargetPos - aiTarget.Position);
                     bool isLinedUp = box.Intersects(ref weaponRay);
 
-#if debug
+
                     d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
                     d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid, isLinedUp ? Color.Red : Color.White, 0.5f);
                     d.DrawAABB(box, isLinedUp ? Color.Red : Color.White);
-#endif
+
 
                     // Checks if weapon is aligned, and within range. (Uses DistanceSquared for performance reasons [don't do sqrt, kids])
                     float r = targeting.GetMaxRange(weapon);

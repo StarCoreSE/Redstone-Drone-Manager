@@ -36,9 +36,9 @@ namespace IngameScript
                 }
                 return;
             }
-            base.Update();
-
             Target = wAPI.GetAiFocus(program.gridId).GetValueOrDefault();
+
+            base.Update();
         }
 
         public override void GetTargets()
