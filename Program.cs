@@ -359,13 +359,22 @@ namespace IngameScript
         List<IMyTextPanel> outLcds = new List<IMyTextPanel>();
 
         Dictionary<string, int> weaponMap = new Dictionary<string, int>();
-        
-        Dictionary<IMyTerminalBlock, Dictionary<string, int>> cachedWeaponMaps = new Dictionary<IMyTerminalBlock, Dictionary<string, int>>();
+
+        Dictionary<IMyTerminalBlock, Dictionary<string, int>> cachedWeaponMaps =
+            new Dictionary<IMyTerminalBlock, Dictionary<string, int>>();
+
         int weaponMapUpdateFrame = 0;
         int targetUpdateTimer = 0;
         const int TARGET_UPDATE_INTERVAL = 10; // Update every 10 ticks
         bool hasShield = false;
         int shieldCheckFrame = 0;
+
+        Vector3D cachedPredictedPos = new Vector3D();
+        int predictedPosUpdateFrame = 0;
+
+        Dictionary<string, Vector3D> cachedAmmoLeadPositions = new Dictionary<string, Vector3D>();
+        int ammoLeadUpdateFrame = 0;
+        string cachedPrimaryAmmo = "";
 
         #endregion
 
@@ -768,12 +777,15 @@ namespace IngameScript
                 }
             }
 
-            if (debug) // Print runtime info
+            if (debug) 
+            {            
                 PrintDebugText();
-
+                DrawLeadDebugs();
+            }
+            
             foreach (var l in outLcds)
                 l.WriteText(outText);
-
+            
             outText = "";
 
             frame++;
@@ -783,14 +795,28 @@ namespace IngameScript
         {
             resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos; // Use predictedTargetPos instead
 
-            if (doCcrp)
-                CCRPHandler();
-            else
-                outText += "CCRP not running! " + (doCcrp ? "NO TARGET" : "DISABLED") + "\n";
+            // Distribute operations across frames
+            switch (frame % 6)
+            {
+                case 0:
+                    if (doCcrp) CCRPHandler();
+                    break;
+                case 1:
+                    targeting.GetObstructions(friendlies);
+                    break;
+                case 2:
+                    AutoFlareHandler();
+                    break;
+                case 3:
+                    // Update projectiles locked on
+                    if (targeting is WCTargetingHelper)
+                    {
+                        var wcTargeting = (WCTargetingHelper)targeting;
+                        projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(gridId);
+                    }
 
-            targeting.GetObstructions(friendlies);
-
-            AutoFlareHandler();
+                    break;
+            }
 
             if (frame % 60 == 0)
             {
@@ -849,46 +875,35 @@ namespace IngameScript
 
             if (!aiTarget.IsEmpty())
             {
-                // Calculate predicted position ONCE and store it
                 if (targeting is WCTargetingHelper && fixedGuns.Count > 0)
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
 
-                    // Get weapon map if not already cached
-                    if (weaponMap.Count == 0 && fixedGuns.First() != null)
+                    // Update predicted position every 5 ticks
+                    if (frame % 5 == predictedPosUpdateFrame)
                     {
-                        wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
+                        if (weaponMap.Count == 0 && fixedGuns.First() != null)
+                        {
+                            wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
+                        }
+                
+                        if (weaponMap.Count > 0)
+                        {
+                            Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(
+                                fixedGuns.First(),
+                                aiTarget.EntityId,
+                                weaponMap.First().Value
+                            );
+                            cachedPredictedPos = predictedPos ?? aiTarget.Position;
+                    
+                            // Also cache the ammo type
+                            cachedPrimaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
+                        }
                     }
 
-                    if (weaponMap.Count > 0)
-                    {
-                        Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(
-                            fixedGuns.First(),
-                            aiTarget.EntityId,
-                            weaponMap.First().Value
-                        );
-
-                        // Get the active ammo for debug
-                        string primaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
-
-                        // Store the predicted position globally
-                        predictedTargetPos = predictedPos ?? aiTarget.Position;
-                        aimPoint = predictedTargetPos;
-
-                        // Show primary lead position with ammo type
-                        d.DrawGPS($"Primary_Lead_{primaryAmmo ?? "Unknown"}", aimPoint, Color.Green);
-                    }
+                    predictedTargetPos = cachedPredictedPos;
+                    aimPoint = predictedTargetPos;
                 }
-                else
-                {
-                    predictedTargetPos = aiTarget.Position;
-                    aimPoint = aiTarget.Position;
-                }
-            }
-            else
-            {
-                aimPoint = centerOfGrid + ctrlMatrix.Forward * 1000;
-                predictedTargetPos = aimPoint;
             }
 
             // Now calculate the direction vector FROM the aim point
@@ -897,7 +912,6 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
             d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f); // Draw to actual aim point
-            //d.DrawGPS("Lead Position", aimPoint); // Show the actual lead position
             d.DrawGPS("Stop Position", stopPosition);
 
             if (fixedFlightArea) nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
@@ -1084,13 +1098,13 @@ namespace IngameScript
         public void AutoFortify()
         {
             if (!autoFortify) return;
-    
+
             // Check shield existence every 300 frames (5 seconds)
             if (frame % 300 == 0)
             {
                 hasShield = dAPI.GridHasShield(Me.CubeGrid);
             }
-    
+
             if (hasShield)
             {
                 try
@@ -1108,7 +1122,9 @@ namespace IngameScript
                         isFortified = false;
                     }
                 }
-                catch { }
+                catch
+                {
+                }
             }
         }
 
@@ -1192,10 +1208,13 @@ namespace IngameScript
             else if (!aiTarget.IsEmpty() && fixedGuns.Count > 0 && targeting is WCTargetingHelper)
             {
                 WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
-                
+
+                // Update weapon maps AND lead positions together every 60 frames
                 if (frame % 60 == weaponMapUpdateFrame)
                 {
                     cachedWeaponMaps.Clear();
+                    cachedAmmoLeadPositions.Clear();
+
                     foreach (var weapon in fixedGuns)
                     {
                         if (!weapon.IsFunctional) continue;
@@ -1204,75 +1223,66 @@ namespace IngameScript
                         if (thisWeaponMap.Count > 0)
                         {
                             cachedWeaponMaps[weapon] = thisWeaponMap;
+
+                            int weaponId = thisWeaponMap.First().Value;
+                            string activeAmmo = wcTargeting.wAPI.GetActiveAmmo(weapon, weaponId);
+
+                            if (activeAmmo != null && !cachedAmmoLeadPositions.ContainsKey(activeAmmo))
+                            {
+                                Vector3D? predictedPos =
+                                    wcTargeting.wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, weaponId);
+                                if (predictedPos.HasValue)
+                                {
+                                    cachedAmmoLeadPositions[activeAmmo] = predictedPos.Value;
+                                }
+                            }
                         }
                     }
                 }
 
-                // Dictionary to store unique ammo types and their predicted positions
-                Dictionary<string, Vector3D> ammoLeadPositions = new Dictionary<string, Vector3D>();
-
+                // Check alignment and fire weapons using cached maps
                 foreach (var weapon in fixedGuns)
                 {
                     if (!weapon.IsFunctional || !cachedWeaponMaps.ContainsKey(weapon)) continue;
 
-                    // Get the weapon map for this specific weapon
-                    Dictionary<string, int> thisWeaponMap = new Dictionary<string, int>();
-                    wcTargeting.wAPI.GetBlockWeaponMap(weapon, thisWeaponMap);
+                    var thisWeaponMap = cachedWeaponMaps[weapon];
+                    int weaponId = thisWeaponMap.First().Value;
+                    bool shouldFire = wcTargeting.wAPI.IsWeaponReadyToFire(weapon);
+                    bool isAligned = wcTargeting.wAPI.IsTargetAligned(weapon, aiTarget.EntityId, weaponId);
+                    shouldFire = shouldFire && isAligned;
 
-                    if (thisWeaponMap.Count > 0)
-                    {
-                        thisWeaponMap = cachedWeaponMaps[weapon];
-                        int weaponId = thisWeaponMap.First().Value;
-                        string activeAmmo = wcTargeting.wAPI.GetActiveAmmo(weapon, weaponId);
-
-
-                        // Only calculate lead position if we haven't already for this ammo type
-                        if (activeAmmo != null && !ammoLeadPositions.ContainsKey(activeAmmo))
-                        {
-                            Vector3D? predictedPos =
-                                wcTargeting.wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, weaponId);
-                            if (predictedPos.HasValue)
-                            {
-                                ammoLeadPositions[activeAmmo] = predictedPos.Value;
-                            }
-                        }
-
-                        // Check if we should fire this weapon
-                        bool shouldFire = wcTargeting.wAPI.IsWeaponReadyToFire(weapon);
-                        bool isAligned = wcTargeting.wAPI.IsTargetAligned(weapon, aiTarget.EntityId, weaponId);
-                        shouldFire = shouldFire && isAligned;
-
-                        Fire(weapon, shouldFire);
-                    }
+                    Fire(weapon, shouldFire);
                 }
 
-                // Now draw GPS markers for each unique ammo type
-                int ammoIndex = 0;
-                foreach (var kvp in ammoLeadPositions)
-                {
-                    string ammoType = kvp.Key;
-                    Vector3D leadPos = kvp.Value;
-
-                    // Use different colors for different ammo types
-                    Color gpsColor = ammoIndex == 0 ? Color.Red : (ammoIndex == 1 ? Color.Yellow : Color.Orange);
-
-                    d.DrawGPS($"Lead_{ammoType}", leadPos, gpsColor);
-                    d.DrawLine(centerOfGrid, leadPos, gpsColor, 0.5f);
-
-                    ammoIndex++;
-                }
-
-                // Debug output every second
-                if (frame % 60 == 0 && ammoLeadPositions.Count > 0)
+                // Debug output
+                if (frame % 60 == 0 && cachedAmmoLeadPositions.Count > 0)
                 {
                     outText += "Ammo Types: ";
-                    foreach (var ammo in ammoLeadPositions.Keys)
+                    foreach (var ammo in cachedAmmoLeadPositions.Keys)
                     {
                         outText += ammo + " ";
                     }
 
                     outText += "\n";
                 }
+            }
+        }
+
+        private void DrawLeadDebugs()
+        {
+            // Draw GPS markers EVERY FRAME using cached positions
+            int ammoIndex = 0;
+            foreach (var kvp in cachedAmmoLeadPositions)
+            {
+                string ammoType = kvp.Key;
+                Vector3D leadPos = kvp.Value;
+
+                Color gpsColor = ammoIndex == 0 ? Color.Red : (ammoIndex == 1 ? Color.Yellow : Color.Orange);
+
+                d.DrawGPS($"Lead_{ammoType}", leadPos, gpsColor);
+                d.DrawLine(centerOfGrid, leadPos, gpsColor, 0.5f);
+
+                ammoIndex++;
             }
         }
 
