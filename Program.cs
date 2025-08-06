@@ -775,15 +775,15 @@ namespace IngameScript
                 }
             }
 
-            if (debug) 
-            {            
+            if (debug)
+            {
                 PrintDebugText();
                 DrawLeadDebugs();
             }
-            
+
             foreach (var l in outLcds)
                 l.WriteText(outText);
-            
+
             outText = "";
 
             frame++;
@@ -860,7 +860,9 @@ namespace IngameScript
                     }
                 }
             }
-            if (frame % 300 == 0) {
+
+            if (frame % 300 == 0)
+            {
                 cachedPredictedPos = new Vector3D();
                 cachedAmmoLeadPositions.Clear();
                 weaponMap.Clear();
@@ -874,33 +876,26 @@ namespace IngameScript
             outText += "Locked onto [" + aiTarget.Name + "]\n";
             if (frame % 2 == 0) ActiveDroneFrame2();
 
-            Vector3D aimPoint = new Vector3D(); // The actual point in space to aim at
-
+            Vector3D aimPoint = new Vector3D();
             if (!aiTarget.IsEmpty())
             {
                 if (targeting is WCTargetingHelper && fixedGuns.Count > 0)
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
-
-                    // Update predicted position every 5 ticks
                     if (frame % 5 == predictedPosUpdateFrame)
                     {
                         if (weaponMap.Count == 0 && fixedGuns.First() != null)
                         {
                             wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
                         }
-                
+
                         if (weaponMap.Count > 0)
                         {
-                            Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(
-                                fixedGuns.First(),
-                                aiTarget.EntityId,
-                                weaponMap.First().Value
-                            );
+                            Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(fixedGuns.First(),
+                                aiTarget.EntityId, weaponMap.First().Value);
                             cachedPredictedPos = predictedPos ?? aiTarget.Position;
-                    
-                            // Also cache the ammo type
-                            cachedPrimaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
+                            cachedPrimaryAmmo =
+                                wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
                         }
                     }
 
@@ -909,81 +904,68 @@ namespace IngameScript
                 }
             }
 
-            // Now calculate the direction vector FROM the aim point
             Vector3D aimDirection = Vector3D.Normalize(aimPoint - centerOfGrid);
-
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-            d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f); // Draw to actual aim point
+            d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f);
             d.DrawGPS("Stop Position", stopPosition);
 
-            nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-            
-            if (nearZone)
+            switch (mode)
             {
-                antenna.HudText += " [ZONE]";
-                ThrustControl(centerOfGrid, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
-            }
-            else
-            {
-                switch (mode)
-                {
-                    case 0:
-                        // Aim at the predicted position
+                case 0:
+                    gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
+                    moveTo = aiTarget.Position +
+                             Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+                    d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                    closestCollision = CheckCollision(moveTo);
+                    if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    break;
+
+                case 1:
+                    double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
+                    if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper)
+                    {
+                        WCTargetingHelper wCTargeting = (WCTargetingHelper)targeting;
+                        foreach (var wep in fixedGuns)
+                        {
+                            if (wCTargeting.wAPI.GetActiveAmmo(wep, 0) == damageAmmo) break;
+                            wep.SetValue<Int64>("WC_PickAmmo", 0);
+                        }
+                    }
+
+                    Vector3D formationAimDirection;
+                    if (dSq > formDistance * formDistance * 4 || healMode)
+                        formationAimDirection = Vector3D.Normalize(controllerPos - centerOfGrid);
+                    else
+                        formationAimDirection = aimDirection;
+
+                    if (!aiTarget.IsEmpty() && !healMode)
+                    {
                         gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                        moveTo = aiTarget.Position +
-                                 Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
-                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                        closestCollision = CheckCollision(moveTo);
-                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
-                        break;
-                    case 1:
-                        double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
-                        if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper)
-                        {
-                            WCTargetingHelper wCTargeting = (WCTargetingHelper)targeting;
-                            foreach (var wep in fixedGuns)
-                            {
-                                if (wCTargeting.wAPI.GetActiveAmmo(wep, 0) == damageAmmo) break;
-                                wep.SetValue<Int64>("WC_PickAmmo", 0);
-                            }
-                        }
+                    }
+                    else
+                    {
+                        gyros.FaceVectors(formationAimDirection, Me.WorldMatrix.Up);
+                    }
 
-                        Vector3D formationAimDirection;
-                        if (dSq > formDistance * formDistance * 4 || healMode)
-                            formationAimDirection = Vector3D.Normalize(controllerPos - centerOfGrid);
-                        else
-                            formationAimDirection = aimDirection;
+                    moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                    d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                    d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                    d.DrawGPS("Drone Position", moveTo);
+                    closestCollision = CheckCollision(moveTo);
+                    if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    break;
 
-                        // In formation mode, still aim at predicted position if we have a target
-                        if (!aiTarget.IsEmpty() && !healMode)
-                        {
-                            gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                        }
-                        else
-                        {
-                            gyros.FaceVectors(formationAimDirection, Me.WorldMatrix.Up);
-                        }
-
-                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-                        d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                        d.DrawGPS("Drone Position", moveTo);
-                        closestCollision = CheckCollision(moveTo);
-                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
-                        break;
-                    case 2:
-                        gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                        moveTo = controllerPos + formationPresets[formation][id];
-                        closestCollision = CheckCollision(moveTo);
-                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
-                        break;
-                }
-
-                moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
-                ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust,
-                    backThrust);
+                case 2:
+                    gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
+                    moveTo = controllerPos + formationPresets[formation][id];
+                    closestCollision = CheckCollision(moveTo);
+                    if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    break;
             }
+
+            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust,
+                backThrust);
         }
 
         private void PrintDebugText()
