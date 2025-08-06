@@ -91,11 +91,9 @@ namespace IngameScript
         int minMissileAge = 2;
 
         // If true, remain within [zoneRadius] of world origin. If false, remain within [zoneRadius] of controller. Default [true]
-        //do you know what that is? if not set to false, also uh, starcore.tv you should check it out -thecrystalwoods
         bool fixedFlightArea = false;
 
         // Radius of the harm zone. this is in meters, not km.
-        // if not starcore, this is the size of the leash (aka how far the drone should go outfrom the controlling grid, SET THIS SMALLER JESUS FUCK, or don't, i'm not your fucking mom - thecrystalwoods
         int zoneRadius = 12000;
 
 
@@ -862,6 +860,11 @@ namespace IngameScript
                     }
                 }
             }
+            if (frame % 300 == 0) {
+                cachedPredictedPos = new Vector3D();
+                cachedAmmoLeadPositions.Clear();
+                weaponMap.Clear();
+            }
         }
 
         private bool nearZone = false;
@@ -914,9 +917,8 @@ namespace IngameScript
             d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f); // Draw to actual aim point
             d.DrawGPS("Stop Position", stopPosition);
 
-            if (fixedFlightArea) nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-            else nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
-
+            nearZone = (stopPosition - controllerPos).LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
+            
             if (nearZone)
             {
                 antenna.HudText += " [ZONE]";
@@ -978,8 +980,7 @@ namespace IngameScript
                         break;
                 }
 
-                if (fixedFlightArea) moveTo = Vector3D.ClampToSphere(moveTo, ozoneRadius);
-                else moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
+                moveTo = Vector3D.Clamp(moveTo, controllerPos - ozoneRadius, controllerPos + ozoneRadius);
                 ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust,
                     backThrust);
             }
