@@ -834,7 +834,7 @@ namespace IngameScript
             outText += "Locked onto [" + aiTarget.Name + "]\n";
             if (frame % 2 == 0) ActiveDroneFrame2();
 
-            Vector3D aimPoint; // The actual point in space to aim at
+            Vector3D aimPoint = new Vector3D(); // The actual point in space to aim at
 
             if (!aiTarget.IsEmpty())
             {
@@ -857,14 +857,15 @@ namespace IngameScript
                             weaponMap.First().Value
                         );
 
+                        // Get the active ammo for debug
+                        string primaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
+
                         // Store the predicted position globally
                         predictedTargetPos = predictedPos ?? aiTarget.Position;
-                        aimPoint = predictedTargetPos; // Use the actual position!
-                    }
-                    else
-                    {
-                        predictedTargetPos = aiTarget.Position;
-                        aimPoint = aiTarget.Position;
+                        aimPoint = predictedTargetPos;
+
+                        // Show primary lead position with ammo type
+                        d.DrawGPS($"Primary_Lead_{primaryAmmo ?? "Unknown"}", aimPoint, Color.Green);
                     }
                 }
                 else
@@ -885,7 +886,7 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
             d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f); // Draw to actual aim point
-            d.DrawGPS("Lead Position", aimPoint); // Show the actual lead position
+            //d.DrawGPS("Lead Position", aimPoint); // Show the actual lead position
             d.DrawGPS("Stop Position", stopPosition);
 
             if (fixedFlightArea) nearZone = stopPosition.LengthSquared() > zoneRadius * (nearZone ? 0.95 : 1);
@@ -1177,29 +1178,68 @@ namespace IngameScript
             {
                 WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
 
-                // Use the already-calculated predictedTargetPos
-                d.DrawGPS("Lead Position", predictedTargetPos, Color.Red);
+                // Dictionary to store unique ammo types and their predicted positions
+                Dictionary<string, Vector3D> ammoLeadPositions = new Dictionary<string, Vector3D>();
 
                 foreach (var weapon in fixedGuns)
                 {
                     if (!weapon.IsFunctional) continue;
 
-                    // Check if we're aligned with the predicted position we're already aiming at
-                    bool isLinedUp = Vector3D.Normalize(predictedTargetPos - centerOfGrid).Dot(Me.WorldMatrix.Forward) >
-                                     maxOffset;
+                    // Get the weapon map for this specific weapon
+                    Dictionary<string, int> thisWeaponMap = new Dictionary<string, int>();
+                    wcTargeting.wAPI.GetBlockWeaponMap(weapon, thisWeaponMap);
 
-                    // Also check WeaponCore's alignment if available
-                    if (weaponMap.Count > 0)
+                    if (thisWeaponMap.Count > 0)
                     {
-                        bool wcAligned =
-                            wcTargeting.wAPI.IsTargetAligned(weapon, aiTarget.EntityId, weaponMap.First().Value);
-                        isLinedUp = isLinedUp || wcAligned; // Use either alignment check
+                        int weaponId = thisWeaponMap.First().Value;
+                        string activeAmmo = wcTargeting.wAPI.GetActiveAmmo(weapon, weaponId);
+
+                        // Only calculate lead position if we haven't already for this ammo type
+                        if (activeAmmo != null && !ammoLeadPositions.ContainsKey(activeAmmo))
+                        {
+                            Vector3D? predictedPos =
+                                wcTargeting.wAPI.GetPredictedTargetPosition(weapon, aiTarget.EntityId, weaponId);
+                            if (predictedPos.HasValue)
+                            {
+                                ammoLeadPositions[activeAmmo] = predictedPos.Value;
+                            }
+                        }
+
+                        // Check if we should fire this weapon
+                        bool shouldFire = wcTargeting.wAPI.IsWeaponReadyToFire(weapon);
+                        bool isAligned = wcTargeting.wAPI.IsTargetAligned(weapon, aiTarget.EntityId, weaponId);
+                        shouldFire = shouldFire && isAligned;
+
+                        Fire(weapon, shouldFire);
+                    }
+                }
+
+                // Now draw GPS markers for each unique ammo type
+                int ammoIndex = 0;
+                foreach (var kvp in ammoLeadPositions)
+                {
+                    string ammoType = kvp.Key;
+                    Vector3D leadPos = kvp.Value;
+
+                    // Use different colors for different ammo types
+                    Color gpsColor = ammoIndex == 0 ? Color.Red : (ammoIndex == 1 ? Color.Yellow : Color.Orange);
+
+                    d.DrawGPS($"Lead_{ammoType}", leadPos, gpsColor);
+                    d.DrawLine(centerOfGrid, leadPos, gpsColor, 0.5f);
+
+                    ammoIndex++;
+                }
+
+                // Debug output every second
+                if (frame % 60 == 0 && ammoLeadPositions.Count > 0)
+                {
+                    outText += "Ammo Types: ";
+                    foreach (var ammo in ammoLeadPositions.Keys)
+                    {
+                        outText += ammo + " ";
                     }
 
-                    d.DrawLine(centerOfGrid, predictedTargetPos, isLinedUp ? Color.Red : Color.Yellow, 0.5f);
-
-                    bool shouldFire = isLinedUp && wcTargeting.wAPI.IsWeaponReadyToFire(weapon);
-                    Fire(weapon, shouldFire);
+                    outText += "\n";
                 }
             }
         }
