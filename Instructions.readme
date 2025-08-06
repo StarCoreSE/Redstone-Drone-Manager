@@ -1,53 +1,5 @@
-﻿RocketMan Drone Manager
+﻿R e a d m e
+-----------
 
-by @Aristeas#1034
-Commissioned by @First-Pass#8270
------------------------------------
-
-
-
-Arguments are not case-sensitive. Settings below can be modified, but in case I forgot to minify it, please don't edit below where it says to
-
-!!RECOMPILE AFTER PASTING IN DRONE!!
-
-
-Construction guide:
-   1. Have a programmable block
-      - This must be placed in the correct orientation; the screen should be facing the rear of the drone.
-      - Make sure to edit any configs BEFORE placing all your drones! They won't share all of their data.
-         - Formation distances are synchronized from controller to drone.
-
-   2. Have thrusters and gyros
-
-   3. Have an antenna
-      - Range, name, and hudtext is not important. Just have an antenna on the grid.
-      - Make sure to protect it! This is the second most important block, other than the programmable block.
-
-   4. Have a controller ship
-      - Set the 'isController' bool in the configs to true on the controller (or set this PB's customdata to "-1")
-      - Make sure it has an antenna too!
-
-   5. Shoot people (optional)
-      - These drones are nearly as stupid as Aristeas, so treat them as blind deaf and dumb.
-
-
-
-
-Arguments:
-	MAIN       - Swarm mode. Flys on its own and targets enemies.
-	WING       - Wingman mode. Follows your ship in a specified formation. [DEFAULT]
-       HEAL    - Heal mode. Switches to healing ammo if set, and enables wingman mode.
-	FORT       - Fortify mode. Moves to your current location and remains there.
-	
-	START      - Starts all drone groups
-	STOP       - Stops all drone groups
-	GROUP      - Switch selected group (0 = all)
-    CTRLGROUP   - Take control of selected group
-	FORM[int]  - Sets current drone group to specified formation preset
-		form0      - Wall formation [DEFAULT]
-		form1      - Sphere formation
-		form2      - V formation
-		form3      - Following line formation
- 
-   LEARNHEAL  - Learns the heal-type ammunition for the guns on the drone. Saved between runs.
-   LEARNDAMAGE- Learns the damage-type ammunition for the guns on the drone. Saved between runs.
+In this file you can include any instructions or other comments you want to have injected onto the 
+top of your final script. You can safely delete this file if you do not want any such comments.

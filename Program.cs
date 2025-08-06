@@ -170,25 +170,7 @@ namespace IngameScript
         // In Development Version //
         //now with 2!!! contributers!!!!1!11!1!!!111!//
         // holy hell //
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        
         int mode = 1;
         /*
          * 0 - Main
