@@ -1517,12 +1517,18 @@ namespace IngameScript
                         if (!droneEntities.Contains(tId)) droneEntities.Add(tId);
                         for (int i = 0; i < droneEntities.Count; i++)
                         {
-                            SendGroupMsg<string>(
-                                "i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + droneEntities[i],
-                                true); // Send message in format: i04EntityId
+                            SendGroupMsg<string>("i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + droneEntities[i],
+                                true);
                         }
 
                         antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
+
+                        // Send current target to all drones when a new one joins
+                        if (targeting.Target.EntityId != 0)
+                        {
+                            SendGroupMsg<long>(targeting.Target.EntityId, true);
+                            SendGroupMsg<Vector3D>(targeting.Target.Position, true);
+                        }
                     }
 
                     break;
