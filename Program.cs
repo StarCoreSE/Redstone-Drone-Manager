@@ -373,6 +373,8 @@ namespace IngameScript
         Dictionary<string, Vector3D> cachedAmmoLeadPositions = new Dictionary<string, Vector3D>();
         int ammoLeadUpdateFrame = 0;
         string cachedPrimaryAmmo = "";
+        
+        bool pendingRecovery = false;
 
         #endregion
 
@@ -427,6 +429,14 @@ namespace IngameScript
             // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneRadius *= zoneRadius;
             ozoneRadius = (int)Math.Sqrt(zoneRadius * 0.95);
+            
+            // Force clear all WC-related caches that might be from a copied drone
+            weaponMap.Clear();
+            cachedWeaponMaps.Clear();
+            cachedAmmoLeadPositions.Clear();
+            cachedPredictedPos = new Vector3D();
+            predictedTargetPos = new Vector3D();
+            aiTarget = new MyDetectedEntityInfo();
 
             if (!isController)
             {
@@ -676,6 +686,13 @@ namespace IngameScript
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
                 return;
+            
+            if (!string.IsNullOrEmpty(argument) && 
+                (argument == "recover" || argument == "recycle" || argument == "reset"))
+            {
+                RecoverDrone();
+                return;
+            }
 
             else if
                 ((!isController || mode == 1) &&
@@ -806,6 +823,74 @@ namespace IngameScript
             frame++;
         }
 
+        void RecoverDrone()
+{
+    Echo("[color=#FFFF00]Initiating drone recovery...[/color]");
+    
+    // Clear all persistent state - like Autopillock does
+    activated = false;
+    id = -1;
+    lastControllerPing = 0;
+    
+    // Clear cached data
+    aiTarget = new MyDetectedEntityInfo();
+    cachedPredictedPos = new Vector3D();
+    predictedTargetPos = new Vector3D();
+    droneEntities.Clear();
+    friendlies.Clear();
+    
+    // Reset control systems
+    if (gyros != null)
+        gyros.Reset();
+    
+    SetThrust(-1f, allThrust, false);
+    
+    // Clear weapon states
+    if (doCcrp)
+    {
+        foreach (var weapon in fixedGuns)
+            Fire(weapon, false);
+    }
+    
+    // Reset group assignment like a fresh drone
+    if (!isController)
+    {
+        if (Me.CustomData == "" || Me.CustomData.Length > 2)
+            Me.CustomData = "1";
+        int.TryParse(Me.CustomData, out group);
+        if (group == -1)
+        {
+            isController = true;
+            group = 0;
+        }
+    }
+    
+    // Reinitialize grid ID
+    gridId = Me.CubeGrid.EntityId;
+    
+    // Re-register IGC listeners (like Autopillock does)
+    myBroadcastListener = IGC.RegisterBroadcastListener(isController ? "-1" : group.ToString());
+    positionListener = IGC.RegisterBroadcastListener("pos" + (multipleControllers ? group.ToString() : ""));
+    velocityListener = IGC.RegisterBroadcastListener("vel" + (multipleControllers ? group.ToString() : ""));
+    orientListener = IGC.RegisterBroadcastListener("ori" + (multipleControllers ? group.ToString() : ""));
+    performanceListener = IGC.RegisterBroadcastListener("per");
+    
+    // Update antenna like Autopillock updates its status
+    if (antenna != null)
+        antenna.HudText = "Awaiting " + (isController ? "Drones!" : "Controller!");
+    
+    // Send handshake message like Autopillock does
+    if (!isController)
+    {
+        IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
+    }
+    
+    // Reset frame counter
+    frame = 0;
+    
+    Echo("[color=#FF00FF00]Drone recovery completed - ready for connection[/color]");
+}
+        
         private void ActiveDroneFrame2()
         {
             resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos; // Use predictedTargetPos instead
@@ -1514,6 +1599,12 @@ namespace IngameScript
                     }
 
                     break;
+                
+                case "recover":
+                case "recycle":
+                case "reset":
+                    RecoverDrone();
+                    return;
             }
 
             if (isController)
