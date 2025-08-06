@@ -373,7 +373,7 @@ namespace IngameScript
         Dictionary<string, Vector3D> cachedAmmoLeadPositions = new Dictionary<string, Vector3D>();
         int ammoLeadUpdateFrame = 0;
         string cachedPrimaryAmmo = "";
-        
+
         bool pendingRecovery = false;
 
         #endregion
@@ -429,7 +429,7 @@ namespace IngameScript
             // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             zoneRadius *= zoneRadius;
             ozoneRadius = (int)Math.Sqrt(zoneRadius * 0.95);
-            
+
             // Force clear all WC-related caches that might be from a copied drone
             weaponMap.Clear();
             cachedWeaponMaps.Clear();
@@ -686,17 +686,22 @@ namespace IngameScript
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
                 return;
-            
-            if (!string.IsNullOrEmpty(argument) && 
+
+            if (!string.IsNullOrEmpty(argument) &&
                 (argument == "recover" || argument == "recycle" || argument == "reset"))
             {
+                if (isController)
+                {
+                    // Broadcast the recover command to all drones
+                    SendGroupMsg<string>("recover", true);
+                    // Also broadcast to the general channel for any unassigned drones
+                    IGC.SendBroadcastMessage("-1", "recover");
+                }
+
                 RecoverDrone();
                 return;
             }
-
-            else if
-                ((!isController || mode == 1) &&
-                 !activated) // Controller doesn't need to be running constantly, unless in wingman mode.
+            else if ((!isController || mode == 1) && !activated)
             {
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
             }
@@ -815,6 +820,32 @@ namespace IngameScript
                 DrawLeadDebugs();
             }
 
+            // Check for WeaponCore issues in active drones
+            if (activated && !doCcrp && fixedGuns.Count > 0)
+            {
+                Echo("[color=#FFFF00]WeaponCore not active but weapons present - attempting recovery[/color]");
+                ReinitializeWeaponCore();
+            }
+
+            // Auto-detect if we might be a copy with conflicting ID
+            if (activated && id != -1 && !isController)
+            {
+                // Check if our stored grid ID doesn't match our actual grid ID
+                if (gridId != Me.CubeGrid.EntityId)
+                {
+                    Echo("[color=#FFFF00]Grid ID mismatch detected - likely a copied drone![/color]");
+                    Echo($"Stored ID: {gridId}, Actual ID: {Me.CubeGrid.EntityId}");
+                    RecoverDrone();
+                    return;
+                }
+            }
+
+            if (activated && !doCcrp && fixedGuns.Count > 0)
+            {
+                Echo("[color=#FFFF00]WeaponCore not active but weapons present - attempting recovery[/color]");
+                ReinitializeWeaponCore();
+            }
+
             foreach (var l in outLcds)
                 l.WriteText(outText);
 
@@ -824,73 +855,153 @@ namespace IngameScript
         }
 
         void RecoverDrone()
-{
-    Echo("[color=#FFFF00]Initiating drone recovery...[/color]");
-    
-    // Clear all persistent state - like Autopillock does
-    activated = false;
-    id = -1;
-    lastControllerPing = 0;
-    
-    // Clear cached data
-    aiTarget = new MyDetectedEntityInfo();
-    cachedPredictedPos = new Vector3D();
-    predictedTargetPos = new Vector3D();
-    droneEntities.Clear();
-    friendlies.Clear();
-    
-    // Reset control systems
-    if (gyros != null)
-        gyros.Reset();
-    
-    SetThrust(-1f, allThrust, false);
-    
-    // Clear weapon states
-    if (doCcrp)
-    {
-        foreach (var weapon in fixedGuns)
-            Fire(weapon, false);
-    }
-    
-    // Reset group assignment like a fresh drone
-    if (!isController)
-    {
-        if (Me.CustomData == "" || Me.CustomData.Length > 2)
-            Me.CustomData = "1";
-        int.TryParse(Me.CustomData, out group);
-        if (group == -1)
         {
-            isController = true;
-            group = 0;
+            Echo("[color=#FFFF00]Initiating drone recovery...[/color]");
+
+            // Reset core drone state
+            id = -1;
+            activated = false;
+            lastControllerPing = 0;
+            aiTarget = new MyDetectedEntityInfo();
+            cachedPredictedPos = new Vector3D();
+            predictedTargetPos = new Vector3D();
+            droneEntities.Clear();
+            friendlies.Clear();
+
+            // Reset control systems
+            if (gyros != null) gyros.Reset();
+            SetThrust(-1f, allThrust, false);
+
+            // Reinitialize WeaponCore
+            ReinitializeWeaponCore();
+
+            // Reset grid tracking
+            gridId = Me.CubeGrid.EntityId;
+
+            // Reinitialize communication listeners
+            myBroadcastListener = IGC.RegisterBroadcastListener(isController ? "-1" : group.ToString());
+            positionListener = IGC.RegisterBroadcastListener("pos" + (multipleControllers ? group.ToString() : ""));
+            velocityListener = IGC.RegisterBroadcastListener("vel" + (multipleControllers ? group.ToString() : ""));
+            orientListener = IGC.RegisterBroadcastListener("ori" + (multipleControllers ? group.ToString() : ""));
+            performanceListener = IGC.RegisterBroadcastListener("per");
+
+            // Update status
+            if (antenna != null) antenna.HudText = "Recovery Complete - Ready for Combat!";
+
+            // Announce presence to controller (important for copied drones)
+            IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
+
+            // Reset frame counter
+            frame = 0;
+
+            Echo("[color=#FF00FF00]Drone recovery completed - Grid ID: " + gridId + "[/color]");
         }
-    }
-    
-    // Reinitialize grid ID
-    gridId = Me.CubeGrid.EntityId;
-    
-    // Re-register IGC listeners (like Autopillock does)
-    myBroadcastListener = IGC.RegisterBroadcastListener(isController ? "-1" : group.ToString());
-    positionListener = IGC.RegisterBroadcastListener("pos" + (multipleControllers ? group.ToString() : ""));
-    velocityListener = IGC.RegisterBroadcastListener("vel" + (multipleControllers ? group.ToString() : ""));
-    orientListener = IGC.RegisterBroadcastListener("ori" + (multipleControllers ? group.ToString() : ""));
-    performanceListener = IGC.RegisterBroadcastListener("per");
-    
-    // Update antenna like Autopillock updates its status
-    if (antenna != null)
-        antenna.HudText = "Awaiting " + (isController ? "Drones!" : "Controller!");
-    
-    // Send handshake message like Autopillock does
-    if (!isController)
-    {
-        IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
-    }
-    
-    // Reset frame counter
-    frame = 0;
-    
-    Echo("[color=#FF00FF00]Drone recovery completed - ready for connection[/color]");
-}
-        
+
+        void ReinitializeWeaponCore()
+        {
+            Echo("Reinitializing WeaponCore systems...");
+
+            // Clear existing weapon data
+            fixedGuns.Clear();
+            allABs.Clear();
+            flares.Clear();
+            weaponMap.Clear();
+            cachedWeaponMaps.Clear();
+            cachedAmmoLeadPositions.Clear();
+
+            // Reset WeaponCore state
+            doCcrp = true;
+
+            // Reinitialize targeting helper
+            try
+            {
+                if (TargetingHelper.WcPbApiExists(Me))
+                    targeting = new WCTargetingHelper(this);
+                else
+                    targeting = new VanillaTargetingHelper(this);
+                Echo("Targeting helper reinitialized");
+            }
+            catch (Exception e)
+            {
+                Echo("Failed to reinitialize targeting: " + e.Message);
+            }
+
+            // Reinitialize weapons with retry logic
+            int retryCount = 0;
+            bool wcInitSuccess = false;
+
+            while (retryCount < 3 && !wcInitSuccess)
+            {
+                try
+                {
+                    // Get weapons
+                    targeting.GetWeapons(fixedGuns, gunGroupName);
+                    Echo($"Found {fixedGuns.Count} weapons");
+
+                    // Initialize WeaponCore API if we have weapons
+                    if (fixedGuns.Count > 0 && targeting is WCTargetingHelper)
+                    {
+                        WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
+
+                        wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
+                        Echo($"WeaponCore initialized with {weaponMap.Count} weapon mappings");
+                        wcInitSuccess = true;
+                        doCcrp = true;
+                    }
+                    else if (fixedGuns.Count == 0)
+                    {
+                        Echo("No weapons found - disabling CCRP");
+                        doCcrp = false;
+                        wcInitSuccess = true; // Not an error, just no weapons
+                    }
+                }
+                catch (Exception e)
+                {
+                    retryCount++;
+                    Echo($"WeaponCore init attempt {retryCount} failed: {e.Message}");
+                    if (retryCount >= 3)
+                    {
+                        Echo("WeaponCore initialization failed after 3 attempts - disabling CCRP");
+                        doCcrp = false;
+                        wcInitSuccess = true; // Stop retrying
+                    }
+                }
+            }
+
+            // Initialize other weapon systems
+            try
+            {
+                // Get afterburners
+                targeting.GetWeapons(allABs, abGroupName);
+                Echo($"Found {allABs.Count} afterburners");
+                RecalcABs();
+
+                // Get flares
+                targeting.GetWeapons(flares, flareGroupName);
+                Echo($"Found {flares.Count} flares");
+
+                // Reset ammo settings
+                if (fixedGuns.Count > 0)
+                {
+                    string[] splitCustomData = new string[2];
+                    IMyTerminalBlock b = fixedGuns[0];
+                    if (b.CustomData != "")
+                    {
+                        splitCustomData = b.CustomData.Split('\n');
+                        healAmmo = splitCustomData[0];
+                        damageAmmo = splitCustomData[1];
+                        Echo($"Restored ammo types - HEAL: {healAmmo}, DAMAGE: {damageAmmo}");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Echo("Error initializing secondary weapon systems: " + e.Message);
+            }
+
+            Echo("WeaponCore reinitialization complete");
+        }
+
         private void ActiveDroneFrame2()
         {
             resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos; // Use predictedTargetPos instead
@@ -1599,7 +1710,7 @@ namespace IngameScript
                     }
 
                     break;
-                
+
                 case "recover":
                 case "recycle":
                 case "reset":
