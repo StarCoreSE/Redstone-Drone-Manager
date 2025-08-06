@@ -877,6 +877,8 @@ namespace IngameScript
             if (frame % 2 == 0) ActiveDroneFrame2();
 
             Vector3D aimPoint = new Vector3D();
+            Vector3D aimDirection;
+
             if (!aiTarget.IsEmpty())
             {
                 if (targeting is WCTargetingHelper && fixedGuns.Count > 0)
@@ -902,20 +904,40 @@ namespace IngameScript
                     predictedTargetPos = cachedPredictedPos;
                     aimPoint = predictedTargetPos;
                 }
+
+                aimDirection = Vector3D.Normalize(aimPoint - centerOfGrid);
+            }
+            else
+            {
+                // No target - use controller's forward direction
+                aimDirection = ctrlMatrix.Forward;
             }
 
-            Vector3D aimDirection = Vector3D.Normalize(aimPoint - centerOfGrid);
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-            d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f);
+
+            if (!aiTarget.IsEmpty())
+            {
+                d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f);
+            }
+
             d.DrawGPS("Stop Position", stopPosition);
 
             switch (mode)
             {
                 case 0:
                     gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                    moveTo = aiTarget.Position +
-                             Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+                    if (!aiTarget.IsEmpty())
+                    {
+                        moveTo = aiTarget.Position +
+                                 Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+                    }
+                    else
+                    {
+                        // No target - maintain formation relative to controller
+                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                    }
+
                     d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                     closestCollision = CheckCollision(moveTo);
                     if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
@@ -936,8 +958,10 @@ namespace IngameScript
                     Vector3D formationAimDirection;
                     if (dSq > formDistance * formDistance * 4 || healMode)
                         formationAimDirection = Vector3D.Normalize(controllerPos - centerOfGrid);
-                    else
+                    else if (!aiTarget.IsEmpty())
                         formationAimDirection = aimDirection;
+                    else
+                        formationAimDirection = ctrlMatrix.Forward; // No target - face same way as controller
 
                     if (!aiTarget.IsEmpty() && !healMode)
                     {
