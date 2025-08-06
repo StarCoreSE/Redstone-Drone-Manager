@@ -359,6 +359,13 @@ namespace IngameScript
         List<IMyTextPanel> outLcds = new List<IMyTextPanel>();
 
         Dictionary<string, int> weaponMap = new Dictionary<string, int>();
+        
+        Dictionary<IMyTerminalBlock, Dictionary<string, int>> cachedWeaponMaps = new Dictionary<IMyTerminalBlock, Dictionary<string, int>>();
+        int weaponMapUpdateFrame = 0;
+        int targetUpdateTimer = 0;
+        const int TARGET_UPDATE_INTERVAL = 10; // Update every 10 ticks
+        bool hasShield = false;
+        int shieldCheckFrame = 0;
 
         #endregion
 
@@ -704,8 +711,12 @@ namespace IngameScript
             {
                 try
                 {
-                    // Update targeting helper
-                    targeting.Update();
+                    // Only update targeting every 10 ticks
+                    if (targetUpdateTimer++ >= TARGET_UPDATE_INTERVAL)
+                    {
+                        targeting.Update();
+                        targetUpdateTimer = 0;
+                    }
 
                     centerOfGrid = Me.CubeGrid.GetPosition();
 
@@ -1072,17 +1083,23 @@ namespace IngameScript
 
         public void AutoFortify()
         {
-            // Autofortify system
-
-            if (autoFortify && dAPI.GridHasShield(Me.CubeGrid))
+            if (!autoFortify) return;
+    
+            // Check shield existence every 300 frames (5 seconds)
+            if (frame % 300 == 0)
+            {
+                hasShield = dAPI.GridHasShield(Me.CubeGrid);
+            }
+    
+            if (hasShield)
             {
                 try
                 {
-                    if (speed < 12 && !isFortified) // fuck you darkstar
+                    if (speed < 12 && !isFortified)
                     {
                         shieldController.CustomData = "1";
                         toggleFort.Apply(shieldController);
-                        isFortified = true; // "dead reckoning" system for autofortify. Breaks if messed with. )))
+                        isFortified = true;
                     }
                     else if (isFortified && speed > 12)
                     {
@@ -1091,9 +1108,7 @@ namespace IngameScript
                         isFortified = false;
                     }
                 }
-                catch
-                {
-                }
+                catch { }
             }
         }
 
@@ -1177,13 +1192,28 @@ namespace IngameScript
             else if (!aiTarget.IsEmpty() && fixedGuns.Count > 0 && targeting is WCTargetingHelper)
             {
                 WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
+                
+                if (frame % 60 == weaponMapUpdateFrame)
+                {
+                    cachedWeaponMaps.Clear();
+                    foreach (var weapon in fixedGuns)
+                    {
+                        if (!weapon.IsFunctional) continue;
+                        Dictionary<string, int> thisWeaponMap = new Dictionary<string, int>();
+                        wcTargeting.wAPI.GetBlockWeaponMap(weapon, thisWeaponMap);
+                        if (thisWeaponMap.Count > 0)
+                        {
+                            cachedWeaponMaps[weapon] = thisWeaponMap;
+                        }
+                    }
+                }
 
                 // Dictionary to store unique ammo types and their predicted positions
                 Dictionary<string, Vector3D> ammoLeadPositions = new Dictionary<string, Vector3D>();
 
                 foreach (var weapon in fixedGuns)
                 {
-                    if (!weapon.IsFunctional) continue;
+                    if (!weapon.IsFunctional || !cachedWeaponMaps.ContainsKey(weapon)) continue;
 
                     // Get the weapon map for this specific weapon
                     Dictionary<string, int> thisWeaponMap = new Dictionary<string, int>();
@@ -1191,8 +1221,10 @@ namespace IngameScript
 
                     if (thisWeaponMap.Count > 0)
                     {
+                        thisWeaponMap = cachedWeaponMaps[weapon];
                         int weaponId = thisWeaponMap.First().Value;
                         string activeAmmo = wcTargeting.wAPI.GetActiveAmmo(weapon, weaponId);
+
 
                         // Only calculate lead position if we haven't already for this ammo type
                         if (activeAmmo != null && !ammoLeadPositions.ContainsKey(activeAmmo))
