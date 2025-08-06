@@ -663,6 +663,9 @@ namespace IngameScript
 
             Echo("[color=#FF00FF00]\nSuccessfully initialized as a " + (isController ? "controller." : "drone.") +
                  "[/color]");
+
+            // Clear any stale targeting data
+            // aiTarget = new MyDetectedEntityInfo();
         }
 
 
@@ -729,7 +732,21 @@ namespace IngameScript
 
                     Echo("1");
                     if (!healMode)
-                        aiTarget = targeting.Target;
+                    {
+                        var currentTarget = targeting.Target;
+                        // Only update aiTarget if we have a valid target from the targeting system
+                        if (!currentTarget.IsEmpty())
+                        {
+                            aiTarget = currentTarget;
+                        }
+                        // If targeting system has no target but we previously had one, clear it
+                        else if (currentTarget.IsEmpty() && !aiTarget.IsEmpty())
+                        {
+                            aiTarget = new MyDetectedEntityInfo();
+                            cachedPredictedPos = new Vector3D();
+                            predictedTargetPos = new Vector3D();
+                        }
+                    }
 
 
                     outText += "Velocity " + speed + "\n";
@@ -878,31 +895,46 @@ namespace IngameScript
 
             Vector3D aimPoint = new Vector3D();
             Vector3D aimDirection;
+            bool hasValidAimPoint = false;
 
             if (!aiTarget.IsEmpty())
             {
                 if (targeting is WCTargetingHelper && fixedGuns.Count > 0)
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
-                    if (frame % 5 == predictedPosUpdateFrame)
+                    if (frame % 60 == 0 && fixedGuns.First() != null)
                     {
-                        if (weaponMap.Count == 0 && fixedGuns.First() != null)
-                        {
-                            wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
-                        }
+                        weaponMap.Clear();
+                        wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
+                    }
 
-                        if (weaponMap.Count > 0)
+                    if (weaponMap.Count > 0)
+                    {
+                        Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(fixedGuns.First(),
+                            aiTarget.EntityId, weaponMap.First().Value);
+                        if (predictedPos.HasValue)
                         {
-                            Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(fixedGuns.First(),
-                                aiTarget.EntityId, weaponMap.First().Value);
-                            cachedPredictedPos = predictedPos ?? aiTarget.Position;
-                            cachedPrimaryAmmo =
-                                wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
+                            cachedPredictedPos = predictedPos.Value;
+                            hasValidAimPoint = true;
                         }
                     }
 
-                    predictedTargetPos = cachedPredictedPos;
-                    aimPoint = predictedTargetPos;
+                    if (frame % 30 == 0)
+                    {
+                        cachedPrimaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
+                    }
+
+                    if (hasValidAimPoint)
+                    {
+                        predictedTargetPos = cachedPredictedPos;
+                        aimPoint = predictedTargetPos;
+                    }
+                }
+
+                // If we have a target but no valid weapon prediction, use the target position
+                if (!hasValidAimPoint)
+                {
+                    aimPoint = aiTarget.Position;
                 }
 
                 aimDirection = Vector3D.Normalize(aimPoint - centerOfGrid);
@@ -1507,7 +1539,15 @@ namespace IngameScript
             {
                 case 'i':
                     if (!isController && long.Parse(argument.Substring(3)) == Me.CubeGrid.EntityId)
+                    {
                         id = int.Parse(argument.Substring(1, 2));
+                        // Clear any stale target data when getting assigned an ID
+                        aiTarget = new MyDetectedEntityInfo();
+                        cachedPredictedPos = new Vector3D();
+                        predictedTargetPos = new Vector3D();
+                        targeting.SetTarget(new MyDetectedEntityInfo());
+                    }
+
                     antenna.HudText = id.ToString() + " | " + mode.ToString() + group.ToString();
                     break;
                 case 'e':
