@@ -376,14 +376,6 @@ namespace IngameScript
 
         bool pendingRecovery = false;
 
-        const double PB_LIMIT_MS = 0.5; // PBLimiter default
-        const double SAFETY_MARGIN = 0.8; // Stay at 80% of limit
-        double swarmTargetMs = PB_LIMIT_MS * SAFETY_MARGIN; // 0.4ms
-        Queue<Action> commandQueue = new Queue<Action>();
-        int throttleLevel = 0; // 0 = no throttle, higher = more throttle
-        double lastSwarmRuntime = 0;
-        bool emergencyThrottle = false;
-
         #endregion
 
 
@@ -700,7 +692,9 @@ namespace IngameScript
             {
                 if (isController)
                 {
+                    // Broadcast the recover command to all drones
                     SendGroupMsg<string>("recover", true);
+                    // Also broadcast to the general channel for any unassigned drones
                     IGC.SendBroadcastMessage("-1", "recover");
                 }
 
@@ -712,56 +706,9 @@ namespace IngameScript
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
             }
 
+
             d.RemoveAll();
 
-            // Update throttle level on controller
-            if (isController && frame % 60 == 0)
-            {
-                UpdateThrottleLevel();
-                // Broadcast throttle level to drones
-                if (throttleLevel != 0 || emergencyThrottle)
-                {
-                    SendGroupMsg<string>($"throttle:{throttleLevel}:{emergencyThrottle}", true);
-                }
-            }
-
-            // Apply throttling on drones
-            if (!isController && throttleLevel > 0)
-            {
-                // Skip frames based on throttle level and drone ID
-                int skipPattern = (throttleLevel + 1) * 2; // 2, 4, 6, 8
-                if (id >= 0 && frame % skipPattern != id % skipPattern)
-                {
-                    frame++;
-                    return; // Skip this frame
-                }
-            }
-
-            // Emergency throttle - only essential operations
-            if (emergencyThrottle && !isController)
-            {
-                // Only run movement and critical safety
-                if (activated)
-                {
-                    try
-                    {
-                        centerOfGrid = Me.CubeGrid.GetPosition();
-                        if (frame % 10 == 0) // Reduced update rate
-                        {
-                            speed = Me.CubeGrid.LinearVelocity.Length();
-                            AutoFortify();
-                        }
-
-                        RunActiveDroneThrottled(); // Simplified movement only
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                frame++;
-                return;
-            }
 
             // Update last controller ping
             if (IGCHandler(updateSource))
@@ -769,13 +716,11 @@ namespace IngameScript
 
             try
             {
-                if (argument.Length > 0)
-                    ParseCommands(argument.ToLower(), updateSource);
+                if (argument.Length > 0) ParseCommands(argument.ToLower(), updateSource);
             }
             catch
             {
             }
-
 
             // Status info
             outText +=
@@ -794,43 +739,29 @@ namespace IngameScript
                 return;
             }
 
-            outText +=
-                $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\n";
-            outText += $"Rocketman Drone Manager\n-------------------------\n";
-            outText += $"{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
-            if (debug)
-            {
-                if (isController)
-                    outText += $"Throttle Level: {throttleLevel} | Swarm Runtime: {lastSwarmRuntime:F2}ms\n";
-                else if (throttleLevel > 0)
-                    outText += $"Throttled (Level {throttleLevel})\n";
-            }
-
-
-            if (activated)
+            if (activated) // Generic "I'm on!" stuff
             {
                 try
                 {
-                    // Use queued operations for expensive tasks
+                    // Only update targeting every 10 ticks
                     if (targetUpdateTimer++ >= TARGET_UPDATE_INTERVAL)
                     {
-                        QueueOperation(() =>
-                        {
-                            targeting.Update();
-                            targetUpdateTimer = 0;
-                        }, 2);
+                        targeting.Update();
+                        targetUpdateTimer = 0;
                     }
 
                     centerOfGrid = Me.CubeGrid.GetPosition();
 
-                    // Your existing logic...
+                    Echo("1");
                     if (!healMode)
                     {
                         var currentTarget = targeting.Target;
+                        // Only update aiTarget if we have a valid target from the targeting system
                         if (!currentTarget.IsEmpty())
                         {
                             aiTarget = currentTarget;
                         }
+                        // If targeting system has no target but we previously had one, clear it
                         else if (currentTarget.IsEmpty() && !aiTarget.IsEmpty())
                         {
                             aiTarget = new MyDetectedEntityInfo();
@@ -839,40 +770,49 @@ namespace IngameScript
                         }
                     }
 
-                    outText += "Velocity " + speed + "\n";
 
+                    outText += "Velocity " + speed + "\n";
+                    Echo("2");
                     if (frame % 60 == 0)
                     {
                         speed = Me.CubeGrid.LinearVelocity.Length();
+
                         AutoFortify();
+
                         AutoIntegrity();
                     }
 
-                    if (isController)
+                    Echo("3");
+                    if (isController) // If on AND is controller, Update drones with new instructions/positions
                     {
+                        Echo("3.5");
                         IGCSendHandler();
                     }
-                    else
+
+                    else // If on AND is drone
                     {
+                        Echo("4.-5");
                         RunActiveDrone();
                     }
 
                     errorCounter = 0;
+                    Echo("4");
                 }
+                // Scary error handling
                 catch (Exception e)
                 {
                     if (errorCounter > 10)
                     {
-                        if (antenna != null) antenna.HudText += " [CRASHED]";
+                        if (antenna != null)
+                            antenna.HudText += " [CRASHED]";
                         throw e;
                     }
 
                     Me.GetSurface(0).WriteText(e.ToString());
+
                     errorCounter++;
                 }
             }
-
-            ProcessQueuedOperations();
 
             if (debug)
             {
@@ -912,67 +852,6 @@ namespace IngameScript
             outText = "";
 
             frame++;
-        }
-
-        void RunActiveDroneThrottled()
-        {
-            Vector3D moveTo = new Vector3D();
-            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-
-            // Simple movement based on mode
-            switch (mode)
-            {
-                case 0: // Main mode - just orbit
-                    if (!aiTarget.IsEmpty())
-                        moveTo = aiTarget.Position +
-                                 Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
-                    else
-                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-                    break;
-
-                case 1: // Wing mode - follow controller
-                    moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-                    break;
-
-                case 2: // Fort mode - stay in place
-                    moveTo = controllerPos + formationPresets[formation][id];
-                    break;
-            }
-
-            // Basic gyro control
-            Vector3D aimDirection = !aiTarget.IsEmpty()
-                ? Vector3D.Normalize(aiTarget.Position - centerOfGrid)
-                : ctrlMatrix.Forward;
-            gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-
-            // Basic thrust
-            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust,
-                backThrust);
-        }
-
-        void QueueOperation(Action operation, int priority = 1)
-        {
-            if (throttleLevel == 0 || priority == 0)
-            {
-                operation(); // Execute immediately if no throttle or high priority
-            }
-            else
-            {
-                commandQueue.Enqueue(operation);
-            }
-        }
-
-// Process queued operations based on available time
-        void ProcessQueuedOperations()
-        {
-            int operationsToProcess = Math.Max(1, 3 - throttleLevel);
-
-            while (commandQueue.Count > 0 && operationsToProcess > 0)
-            {
-                var operation = commandQueue.Dequeue();
-                operation();
-                operationsToProcess--;
-            }
         }
 
         void RecoverDrone()
@@ -1123,32 +1002,28 @@ namespace IngameScript
             Echo("WeaponCore reinitialization complete");
         }
 
-        void ActiveDroneFrame2()
+        private void ActiveDroneFrame2()
         {
-            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos;
+            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos; // Use predictedTargetPos instead
 
-            // Reduce operation frequency when throttled
-            int frameModulo = 6 * (throttleLevel + 1);
-
-            switch (frame % frameModulo)
+            // Distribute operations across frames
+            switch (frame % 6)
             {
                 case 0:
-                    if (doCcrp) QueueOperation(() => CCRPHandler(), 0); // High priority
+                    if (doCcrp) CCRPHandler();
                     break;
                 case 1:
-                    QueueOperation(() => targeting.GetObstructions(friendlies), 2);
+                    targeting.GetObstructions(friendlies);
                     break;
                 case 2:
-                    QueueOperation(() => AutoFlareHandler(), 0); // High priority for safety
+                    AutoFlareHandler();
                     break;
                 case 3:
+                    // Update projectiles locked on
                     if (targeting is WCTargetingHelper)
                     {
-                        QueueOperation(() =>
-                        {
-                            var wcTargeting = (WCTargetingHelper)targeting;
-                            projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(gridId);
-                        }, 1);
+                        var wcTargeting = (WCTargetingHelper)targeting;
+                        projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(gridId);
                     }
 
                     break;
@@ -1208,38 +1083,6 @@ namespace IngameScript
         }
 
         private bool nearZone = false;
-
-        void UpdateThrottleLevel()
-        {
-            if (!isController) return;
-
-            // Average runtime per frame (assuming 60fps)
-            double avgRuntimePerFrame = totalRuntime / 60.0;
-
-            // Calculate how much we're over/under target
-            double runtimeRatio = avgRuntimePerFrame / swarmTargetMs;
-
-            if (runtimeRatio > 1.5) // Emergency - way over limit
-            {
-                emergencyThrottle = true;
-                throttleLevel = 4;
-            }
-            else if (runtimeRatio > 1.2)
-            {
-                throttleLevel = Math.Min(throttleLevel + 1, 3);
-            }
-            else if (runtimeRatio > 1.0)
-            {
-                throttleLevel = Math.Min(throttleLevel + 1, 2);
-            }
-            else if (runtimeRatio < 0.6 && throttleLevel > 0)
-            {
-                throttleLevel = Math.Max(throttleLevel - 1, 0);
-                emergencyThrottle = false;
-            }
-
-            lastSwarmRuntime = avgRuntimePerFrame;
-        }
 
         void RunActiveDrone()
         {
@@ -1380,18 +1223,7 @@ namespace IngameScript
         private void PrintDebugText()
         {
             outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs}ms\n";
-            if (isController)
-            {
-                outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)\n";
-                outText +=
-                    $"Avg per drone: {(droneEntities.Count > 0 ? totalRuntime / droneEntities.Count : 0):F2}ms\n";
-                outText += $"Target: {swarmTargetMs}ms | Throttle: {throttleLevel}\n";
-            }
-            else if (throttleLevel > 0)
-            {
-                outText += $"Queue: {commandQueue.Count} operations\n";
-            }
-
+            if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
             if (frame % 4 == 0)
             {
                 if (!isController)
