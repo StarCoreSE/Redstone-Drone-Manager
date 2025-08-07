@@ -726,11 +726,6 @@ namespace IngameScript
             outText +=
                 $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
 
-
-            d.PrintHUD(Me.CubeGrid.CustomName + ": " +
-                       RoundPlaces((DateTime.Now.Ticks - lastControllerPing) / 10000000, 2) + "s");
-
-
             // If ID unset and is not controller, ping controller for ID.
             if (id == -1 && !isController)
             {
