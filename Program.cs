@@ -62,6 +62,14 @@ namespace IngameScript
         // Toggles debug mode. Outputs performance, but increases performance cost. Default [250]
         bool debug = true;
 
+        /* PERFORMANCE SETTINGS */
+
+        // Runtime threshold in milliseconds - operations throttle above this
+        double runtimeThreshold = 0.8;
+
+        // Exponential moving average significance for runtime tracking
+        const double RUNTIME_SIGNIFICANCE = 0.005;
+
 
         /* DRONE SETTINGS */
 
@@ -112,7 +120,7 @@ namespace IngameScript
 
         string[] angryText = new string[]
         {
-            "[ANGERY]",
+            "ANGERY",
             "YOU SHOULD FLY INTO THE HARMZONE... NOW!",
             "*Pumped Up Kicks*",
             "R2D2 noises",
@@ -163,6 +171,7 @@ namespace IngameScript
 
         DebugAPI d;
 
+        double averageRuntimeMS = 0;
 
         bool activated = false; // have I been told to move?
 
@@ -400,7 +409,7 @@ namespace IngameScript
             }
             catch (Exception e)
             {
-                Echo("[color=#FFFF0000] !!! If you can see this, you're missing something important !!! [/color]");
+                Echo(" !!! If you can see this, you're missing something important !!!");
                 throw e;
             }
         }
@@ -495,7 +504,7 @@ namespace IngameScript
             }
             catch
             {
-                Echo("[color=#FFFF0000]No shield controller![/color]");
+                Echo("No shield controller!");
             }
 
             // Check if shield controller exists, set up shortcut actions for Fortify and Integrity.
@@ -512,7 +521,7 @@ namespace IngameScript
             }
             catch
             {
-                Echo("[color=#FFFF0000]No shield modulator![/color]");
+                Echo("No shield modulator!");
             }
 
             // Autosets mass if ship controller detected
@@ -576,7 +585,7 @@ namespace IngameScript
                         damageAmmo = splitCustomData[1];
 
                         Echo(
-                            $"[color=#FFFFFF00]Set ammo types to:\n    HEAL - {healAmmo}\n    DAMAGE - {damageAmmo}[/color]");
+                            $"Set ammo types to:\n    HEAL - {healAmmo}\n    DAMAGE - {damageAmmo}");
                     }
                 }
             }
@@ -591,7 +600,7 @@ namespace IngameScript
             }
             catch
             {
-                Echo("[color=#FFFFAA00]No afterburners detected![/color]");
+                Echo("No afterburners detected!");
             }
 
             Echo($"Found {allABs.Count} afterburners");
@@ -671,8 +680,8 @@ namespace IngameScript
             gridId = Me.CubeGrid.EntityId;
             frame = 0;
 
-            Echo("[color=#FF00FF00]\nSuccessfully initialized as a " + (isController ? "controller." : "drone.") +
-                 "[/color]");
+            Echo("Successfully initialized as a " + (isController ? "controller." : "drone.") +
+                 "");
 
             // Clear any stale targeting data
             // aiTarget = new MyDetectedEntityInfo();
@@ -686,6 +695,9 @@ namespace IngameScript
             // Prevents running multiple times per tick
             if (updateSource == UpdateType.IGC)
                 return;
+
+            // Update performance average using EMA
+            averageRuntimeMS = RUNTIME_SIGNIFICANCE * Runtime.LastRunTimeMs + (1 - RUNTIME_SIGNIFICANCE) * averageRuntimeMS;
 
             if (!string.IsNullOrEmpty(argument) &&
                 (argument == "recover" || argument == "recycle" || argument == "reset"))
@@ -724,7 +736,9 @@ namespace IngameScript
 
             // Status info
             outText +=
-                $"[M{mode} : G{group} : ID{id}] {(activated ? "[color=#FF00FF00]ACTIVE[/color]" : "[color=#FFFF0000]INACTIVE[/color]")} {IndicateRun()}\n\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+                $"M{mode} : G{group} : ID{id} {(activated ? "ACTIVE" : "INACTIVE")} {IndicateRun()}\n";
+            outText += $"Runtime: {Runtime.LastRunTimeMs:F2}ms | Avg: {averageRuntimeMS:F2}ms | Limit: {runtimeThreshold}ms\n";
+            outText += $"\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
 
             // If ID unset and is not controller, ping controller for ID.
             if (id == -1 && !isController)
@@ -738,56 +752,74 @@ namespace IngameScript
             {
                 try
                 {
-                    // Only update targeting every 10 ticks
-                    if (targetUpdateTimer++ >= TARGET_UPDATE_INTERVAL)
+                    if (averageRuntimeMS < runtimeThreshold)
                     {
-                        targeting.Update();
-                        targetUpdateTimer = 0;
-                    }
-
-                    centerOfGrid = Me.CubeGrid.GetPosition();
-
-                    Echo("1");
-                    if (!healMode)
-                    {
-                        var currentTarget = targeting.Target;
-                        // Only update aiTarget if we have a valid target from the targeting system
-                        if (!currentTarget.IsEmpty())
+                        // Only update targeting every 10 ticks
+                        if (targetUpdateTimer++ >= TARGET_UPDATE_INTERVAL)
                         {
-                            aiTarget = currentTarget;
+                            targeting.Update();
+                            targetUpdateTimer = 0;
                         }
-                        // If targeting system has no target but we previously had one, clear it
-                        else if (currentTarget.IsEmpty() && !aiTarget.IsEmpty())
+
+                        centerOfGrid = Me.CubeGrid.GetPosition();
+
+                        Echo("1");
+                        if (!healMode)
                         {
-                            aiTarget = new MyDetectedEntityInfo();
-                            cachedPredictedPos = new Vector3D();
-                            predictedTargetPos = new Vector3D();
+                            var currentTarget = targeting.Target;
+                            // Only update aiTarget if we have a valid target from the targeting system
+                            if (!currentTarget.IsEmpty())
+                            {
+                                aiTarget = currentTarget;
+                            }
+                            // If targeting system has no target but we previously had one, clear it
+                            else if (currentTarget.IsEmpty() && !aiTarget.IsEmpty())
+                            {
+                                aiTarget = new MyDetectedEntityInfo();
+                                cachedPredictedPos = new Vector3D();
+                                predictedTargetPos = new Vector3D();
+                            }
+                        }
+
+
+                        outText += "Velocity " + speed + "\n";
+                        Echo("2");
+                        if (frame % 60 == 0)
+                        {
+                            speed = Me.CubeGrid.LinearVelocity.Length();
+
+                            AutoFortify();
+
+                            AutoIntegrity();
+                        }
+
+                        Echo("3");
+                        if (isController) // If on AND is controller, Update drones with new instructions/positions
+                        {
+                            Echo("3.5");
+                            IGCSendHandler();
+                        }
+
+                        else // If on AND is drone
+                        {
+                            Echo("4.-5");
+                            RunActiveDrone();
                         }
                     }
-
-
-                    outText += "Velocity " + speed + "\n";
-                    Echo("2");
-                    if (frame % 60 == 0)
+                    else
                     {
-                        speed = Me.CubeGrid.LinearVelocity.Length();
-
-                        AutoFortify();
-
-                        AutoIntegrity();
-                    }
-
-                    Echo("3");
-                    if (isController) // If on AND is controller, Update drones with new instructions/positions
-                    {
-                        Echo("3.5");
-                        IGCSendHandler();
-                    }
-
-                    else // If on AND is drone
-                    {
-                        Echo("4.-5");
-                        RunActiveDrone();
+                        // Performance is poor - only do critical operations
+                        centerOfGrid = Me.CubeGrid.GetPosition();
+                        outText += "PERFORMANCE THROTTLED\n";
+                        
+                        // Still do basic drone operations for safety
+                        if (!isController && activated)
+                        {
+                            // Minimal drone execution
+                            Vector3D moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
+                            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+                        }
                     }
 
                     errorCounter = 0;
@@ -812,23 +844,24 @@ namespace IngameScript
             if (debug)
             {
                 PrintDebugText();
-                DrawLeadDebugs();
+                if (averageRuntimeMS < runtimeThreshold * 0.5)
+                    DrawLeadDebugs();
             }
 
             // Check for WeaponCore issues in active drones
-            if (activated && !doCcrp && fixedGuns.Count > 0)
+            if (activated && !doCcrp && fixedGuns.Count > 0 && frame % (averageRuntimeMS > runtimeThreshold ? 120 : 60) == 0)
             {
-                Echo("[color=#FFFF00]WeaponCore not active but weapons present - attempting recovery[/color]");
+                Echo("WeaponCore not active but weapons present - attempting recovery");
                 ReinitializeWeaponCore();
             }
 
             // Auto-detect if we might be a copy with conflicting ID
-            if (activated && id != -1 && !isController)
+            if (activated && id != -1 && !isController && frame % (averageRuntimeMS > runtimeThreshold ? 600 : 300) == 0)
             {
                 // Check if our stored grid ID doesn't match our actual grid ID
                 if (gridId != Me.CubeGrid.EntityId)
                 {
-                    Echo("[color=#FFFF00]Grid ID mismatch detected - likely a copied drone![/color]");
+                    Echo("Grid ID mismatch detected - likely a copied drone!");
                     Echo($"Stored ID: {gridId}, Actual ID: {Me.CubeGrid.EntityId}");
                     RecoverDrone();
                     return;
@@ -837,12 +870,15 @@ namespace IngameScript
 
             if (activated && !doCcrp && fixedGuns.Count > 0)
             {
-                Echo("[color=#FFFF00]WeaponCore not active but weapons present - attempting recovery[/color]");
+                Echo("WeaponCore not active but weapons present - attempting recovery");
                 ReinitializeWeaponCore();
             }
 
-            foreach (var l in outLcds)
-                l.WriteText(outText);
+            if (averageRuntimeMS < runtimeThreshold)
+            {
+                foreach (var l in outLcds)
+                    l.WriteText(outText);
+            }
 
             outText = "";
 
@@ -851,7 +887,7 @@ namespace IngameScript
 
         void RecoverDrone()
         {
-            Echo("[color=#FFFF00]Initiating drone recovery...[/color]");
+            Echo("nitiating drone recovery...");
 
             // Reset core drone state
             id = -1;
@@ -889,7 +925,7 @@ namespace IngameScript
             // Reset frame counter
             frame = 0;
 
-            Echo("[color=#FF00FF00]Drone recovery completed - Grid ID: " + gridId + "[/color]");
+            Echo("Drone recovery completed - Grid ID: " + gridId + "");
         }
 
         void ReinitializeWeaponCore()
@@ -1002,20 +1038,23 @@ namespace IngameScript
             resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos; // Use predictedTargetPos instead
 
             // Distribute operations across frames
-            switch (frame % 6)
+            int frameModulo = averageRuntimeMS > runtimeThreshold * 0.5 ? 12 : 6;
+            
+            switch (frame % frameModulo)
             {
                 case 0:
                     if (doCcrp) CCRPHandler();
                     break;
                 case 1:
-                    targeting.GetObstructions(friendlies);
+                    if (averageRuntimeMS < runtimeThreshold)
+                        targeting.GetObstructions(friendlies);
                     break;
                 case 2:
                     AutoFlareHandler();
                     break;
                 case 3:
                     // Update projectiles locked on
-                    if (targeting is WCTargetingHelper)
+                    if (targeting is WCTargetingHelper && averageRuntimeMS < runtimeThreshold)
                     {
                         var wcTargeting = (WCTargetingHelper)targeting;
                         projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(gridId);
@@ -1024,10 +1063,12 @@ namespace IngameScript
                     break;
             }
 
-            if (frame % 60 == 0)
+            int performanceMultiplier = averageRuntimeMS > runtimeThreshold * 0.5 ? 2 : 1;
+
+            if (frame % (60 * performanceMultiplier) == 0)
             {
                 // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
-                if (!healMode && (mode == 0 || autoTarget))
+                if (!healMode && (mode == 0 || autoTarget) && averageRuntimeMS < runtimeThreshold)
                     targeting.SetTarget(targeting.GetClosestTarget());
                 else if (healMode && autoTarget)
                     aiTarget = friendlies[0];
@@ -1040,20 +1081,23 @@ namespace IngameScript
 
                 bool needsRecalc = false;
                 // check if any thrusters are dead
-                foreach (var t in allThrust)
+                if (averageRuntimeMS < runtimeThreshold)
                 {
-                    if (t.WorldAABB == new BoundingBoxD())
+                    foreach (var t in allThrust)
                     {
-                        needsRecalc = true;
-                        break;
+                        if (t.WorldAABB == new BoundingBoxD())
+                        {
+                            needsRecalc = true;
+                            break;
+                        }
                     }
-                }
 
-                if (needsRecalc)
-                {
-                    GridTerminalSystem.GetBlocksOfType(allThrust);
-                    RecalcThrust();
-                    outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                    if (needsRecalc)
+                    {
+                        GridTerminalSystem.GetBlocksOfType(allThrust);
+                        RecalcThrust();
+                        outText += $"Recalculated thrust with {allThrust.Count} thrusters";
+                    }
                 }
 
                 // Revengance status
@@ -1069,7 +1113,7 @@ namespace IngameScript
                 }
             }
 
-            if (frame % 300 == 0)
+            if (frame % (300 * performanceMultiplier) == 0)
             {
                 cachedPredictedPos = new Vector3D();
                 cachedAmmoLeadPositions.Clear();
@@ -1093,7 +1137,9 @@ namespace IngameScript
                 if (targeting is WCTargetingHelper && fixedGuns.Count > 0)
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
-                    if (frame % 60 == 0 && fixedGuns.First() != null)
+                    
+                    int weaponUpdateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 120 : 60;
+                    if (frame % weaponUpdateInterval == 0 && fixedGuns.First() != null)
                     {
                         weaponMap.Clear();
                         wcTargeting.wAPI.GetBlockWeaponMap(fixedGuns.First(), weaponMap);
@@ -1110,7 +1156,8 @@ namespace IngameScript
                         }
                     }
 
-                    if (frame % 30 == 0)
+                    int ammoUpdateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 60 : 30;
+                    if (frame % ammoUpdateInterval == 0)
                     {
                         cachedPrimaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
                     }
@@ -1139,12 +1186,13 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
 
-            if (!aiTarget.IsEmpty())
+            if (!aiTarget.IsEmpty() && averageRuntimeMS < runtimeThreshold)
             {
                 d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f);
             }
 
-            d.DrawGPS("Stop Position", stopPosition);
+            if (averageRuntimeMS < runtimeThreshold)
+                d.DrawGPS("Stop Position", stopPosition);
 
             switch (mode)
             {
@@ -1161,14 +1209,18 @@ namespace IngameScript
                         moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
                     }
 
-                    d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                    closestCollision = CheckCollision(moveTo);
-                    if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    if (averageRuntimeMS < runtimeThreshold)
+                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                    if (averageRuntimeMS < runtimeThreshold * 0.7)
+                    {
+                        closestCollision = CheckCollision(moveTo);
+                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    }
                     break;
 
                 case 1:
                     double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
-                    if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper)
+                    if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper && frame % (averageRuntimeMS > runtimeThreshold * 0.5 ? 60 : 30) == 0)
                     {
                         WCTargetingHelper wCTargeting = (WCTargetingHelper)targeting;
                         foreach (var wep in fixedGuns)
@@ -1196,18 +1248,27 @@ namespace IngameScript
                     }
 
                     moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-                    d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                    d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                    d.DrawGPS("Drone Position", moveTo);
-                    closestCollision = CheckCollision(moveTo);
-                    if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    if (averageRuntimeMS < runtimeThreshold)
+                    {
+                        d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                        d.DrawGPS("Drone Position", moveTo);
+                    }
+                    if (averageRuntimeMS < runtimeThreshold * 0.7)
+                    {
+                        closestCollision = CheckCollision(moveTo);
+                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    }
                     break;
 
                 case 2:
                     gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     moveTo = controllerPos + formationPresets[formation][id];
-                    closestCollision = CheckCollision(moveTo);
-                    if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    if (averageRuntimeMS < runtimeThreshold * 0.7)
+                    {
+                        closestCollision = CheckCollision(moveTo);
+                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                    }
                     break;
             }
 
@@ -1217,7 +1278,8 @@ namespace IngameScript
 
         private void PrintDebugText()
         {
-            outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs}ms\n";
+            outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
+            outText += $"Avg Runtime: {averageRuntimeMS:F2}ms\n";
             if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
             if (frame % 4 == 0)
             {
@@ -1378,7 +1440,8 @@ namespace IngameScript
             {
                 MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
 
-                d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
+                if (averageRuntimeMS < runtimeThreshold)
+                    d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
 
 
                 if (rotate)
@@ -1423,8 +1486,9 @@ namespace IngameScript
                                  maxOffset;
                 foreach (var weapon in fixedGuns)
                 {
-                    d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid,
-                        Color.White, 0.5f);
+                    if (averageRuntimeMS < runtimeThreshold)
+                        d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid,
+                            Color.White, 0.5f);
                     if (isLinedUp && targeting.GetWeaponReady(weapon))
                     {
                         Fire(weapon, true);
@@ -1440,7 +1504,8 @@ namespace IngameScript
                 WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
 
                 // Update weapon maps AND lead positions together every 60 frames
-                if (frame % 60 == weaponMapUpdateFrame)
+                int updateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 120 : 60;
+                if (frame % updateInterval == weaponMapUpdateFrame)
                 {
                     cachedWeaponMaps.Clear();
                     cachedAmmoLeadPositions.Clear();
@@ -1676,10 +1741,10 @@ namespace IngameScript
                             if (damageAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
                         }
 
-                        Echo("[color=#FF00FF00]Learned damage ammo [/color]" + healAmmo);
+                        Echo("Learned damage ammo " + healAmmo);
                     }
                     else
-                        Echo("[color=#FFFF0000]Weaponcore not active![/color]");
+                        Echo("Weaponcore not active!");
 
                     break;
                 case "learndamage":
@@ -1692,10 +1757,10 @@ namespace IngameScript
                             if (healAmmo != "") w.CustomData = healAmmo + "\n" + damageAmmo;
                         }
 
-                        Echo("[color=#FF00FF00]Learned damage ammo [/color]" + damageAmmo);
+                        Echo("Learned damage ammo " + damageAmmo);
                     }
                     else
-                        Echo("[color=#FFFF0000]Weaponcore not active![/color]");
+                        Echo("Weaponcore not active!");
 
                     break;
                 case "ctrlgroup":
