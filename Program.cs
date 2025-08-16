@@ -1539,7 +1539,7 @@ namespace IngameScript
             if (!isController || currentFrameRuntimes.Count == 0) return;
 
             // Simple average of all reported drone average runtimes
-            double currentSwarmAverage = currentFrameRuntimes.Average();
+            double currentSwarmAverage = currentFrameRuntimes.Sum();
     
             // Update rolling average
             averageSwarmRuntimeMS = currentSwarmAverage;
