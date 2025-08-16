@@ -791,7 +791,6 @@ namespace IngameScript
 
                     if (!isThrottled || (_frame % throttleFrames) == 1)
                     {
-                        Echo("1");
                         if (!_healMode)
                         {
                             var currentTarget = _targeting.Target;
@@ -813,7 +812,6 @@ namespace IngameScript
                     if (!isThrottled || (_frame % throttleFrames) == 2)
                     {
                         OutText += "Velocity " + _speed + "\n";
-                        Echo("2");
 
                         // Update speed and auto-systems less frequently when throttled
                         int systemUpdateInterval = isThrottled ? 120 : 60;
@@ -827,10 +825,8 @@ namespace IngameScript
 
                     if (!isThrottled || (_frame % throttleFrames) == 3)
                     {
-                        Echo("3");
                         if (_isController) // If on AND is controller, Update drones with new instructions/positions
                         {
-                            Echo("3.5");
                             IgcSendHandler();
                             UpdateSwarmPerformanceAverage();
                         }
@@ -840,7 +836,6 @@ namespace IngameScript
                     {
                         //if (!isThrottled || (frame % throttleFrames) == 4)
                         //{
-                            Echo("4.-5");
                             RunActiveDrone();
                         //}
                     }
@@ -852,7 +847,6 @@ namespace IngameScript
                     }
 
                     _errorCounter = 0;
-                    Echo("4");
                 }
                 // Scary error handling
                 catch (Exception e)
