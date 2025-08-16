@@ -9,7 +9,7 @@ using VRageMath;
 
 namespace IngameScript
 {
-    partial class Program : MyGridProgram
+    public partial class Program : MyGridProgram
     {
         #region mdk preserve
 
@@ -50,6 +50,9 @@ namespace IngameScript
         // Toggles debug mode. Outputs performance, but increases performance cost. Default [250]
         bool _debug = true;
 
+        // Tag for docking components (connector and controller). Default "[AutoDock]"
+        string _dockingTag = "[AutoDock]";
+
         /* PERFORMANCE SETTINGS */
 
         // Runtime threshold in milliseconds - operations throttle above this (PER DRONE)
@@ -58,11 +61,9 @@ namespace IngameScript
         // Exponential moving average significance for runtime tracking
         const double RuntimeSignificance = 0.005;
 
-
         /* DRONE SETTINGS */
 
         // Set this to the grid's mass (in KG) IF there is no controller (cockpit, remote control) on the grid.
-        // put one of these on the fucking drone or i'll fucking show up in your room while you're asleep and steal shit -thecrystalwoods
         float _mass = 1300000;
 
         // Toggles if CCRP (autofire fixed guns) runs. Leave this on, I beg you. Default [TRUE]
@@ -89,9 +90,7 @@ namespace IngameScript
         // Radius of the harm zone. this is in meters, not km.
         int _zoneRadius = 12000;
 
-
         // PID values
-
         #region PID values
 
         static double _kP = 32;
@@ -101,7 +100,16 @@ namespace IngameScript
         static double _upperBound = 1000;
         static double _timeStep = 1.0 / 60;
 
+        // DON'T EDIT BELOW THIS LINE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING //
+        // OR YOU'RE ARISTEAS //
+        //or you're oat :P//
+        // I CAN'T STOP MYSELF //
+
         #endregion
+
+        // In Development Version //
+        //now with 2!!! contributers!!!!1!11!1!!!111!//
+        // holy hell //
 
         string[] _angryText = new string[]
         {
@@ -124,85 +132,62 @@ namespace IngameScript
             "zone-chan is the best waifu"
         };
 
-
-        // DON'T EDIT BELOW THIS LINE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING //
-        // OR YOU'RE ARISTEAS //
-        //or you're oat :P//
-        // I CAN'T STOP MYSELF //
-
         #endregion
 
-        // In Development Version //
-        //now with 2!!! contributers!!!!1!11!1!!!111!//
-        // holy hell //
-
+        // Core drone variables
         int _mode = 1;
-        /*
-         * 0 - Main
-         *     Shoot and Scoot
-         *     Swarm and Shoot
-         *
-         * 1 - Wingman
-         *     Orbit controller & fire at enemies
-         *
-         * 2 - Fortify Fire
-         *     GOTO controller and stay. Enter fortify and fire at enemies
-         */
-
         char _runIndicator = '|';
+        long _gridEntityId; // Store our grid's entity ID for safety checks
 
+        // API and helper classes
         PbApiWrapper _dApi;
         TargetingHelper _targeting;
-
         DebugAPI _d;
+        DockingManager _dockingManager; // New docking system
 
+        // Performance tracking
         double _averageRuntimeMs;
 
-        bool _activated; // have I been told to move?
-
-        Vector3D _centerOfGrid; // Me.position
+        // State variables
+        bool _activated;
+        Vector3D _centerOfGrid;
         IMyCockpit _cockpit;
-
         long _frame;
-
         MyDetectedEntityInfo _aiTarget;
 
-        GyroControl _gyros;
+        // Control systems - Made public for docking manager access
+        public GyroControl _gyros;
 
+        // Communication
         IMyBroadcastListener _myBroadcastListener;
         IMyBroadcastListener _positionListener;
         IMyBroadcastListener _velocityListener;
         IMyBroadcastListener _orientListener;
         IMyBroadcastListener _performanceListener;
 
+        // Docking host communication (for controllers)
+        IMyBroadcastListener _dockingPingListener;
+        List<IMyShipConnector> _hostConnectors = new List<IMyShipConnector>();
 
-        int _group = 1; // Supports groups 1 through 4.
-
+        int _group = 1;
         List<long> _droneEntities = new List<long>();
         List<MyDetectedEntityInfo> _friendlies = new List<MyDetectedEntityInfo>();
-
         MyTuple<bool, int, int> _projectilesLockedOn = new MyTuple<bool, int, int>(false, 0, -1);
 
-        public string OutText = ""; // Text buffer to avoid lag:tm:
-
+        public string OutText = "";
         public long GridId;
 
         #region drone-specific
 
         long _controlId = 0;
         long _lastControllerPing;
-
         static readonly double Cos45 = Math.Sqrt(2) / 2;
-
         int _formation;
 
         readonly Vector3D[][] _formationPresets = new Vector3D[][]
         {
-            new[] // X
+            new[] // X formation
             {
-                // Max 32
-
-                // Ring 1
                 new Vector3D(_formDistance, 0, 0),
                 new Vector3D(-_formDistance, 0, 0),
                 new Vector3D(0, _formDistance, 0),
@@ -211,8 +196,7 @@ namespace IngameScript
                 new Vector3D(Cos45 * _formDistance, -Cos45 * _formDistance, 0),
                 new Vector3D(-Cos45 * _formDistance, Cos45 * _formDistance, 0),
                 new Vector3D(-Cos45 * _formDistance, -Cos45 * _formDistance, 0),
-
-                // Ring 2
+                // Additional ring positions...
                 new Vector3D(1.5 * _formDistance, 0, 0),
                 new Vector3D(-1.5 * _formDistance, 0, 0),
                 new Vector3D(0, 1.5 * _formDistance, 0),
@@ -221,8 +205,6 @@ namespace IngameScript
                 new Vector3D(1.5 * Cos45 * _formDistance, -1.5 * Cos45 * _formDistance, 0),
                 new Vector3D(-1.5 * Cos45 * _formDistance, 1.5 * Cos45 * _formDistance, 0),
                 new Vector3D(-1.5 * Cos45 * _formDistance, -1.5 * Cos45 * _formDistance, 0),
-
-                // Ring 3
                 new Vector3D(3.0 * _formDistance, 0, 0),
                 new Vector3D(-3.0 * _formDistance, 0, 0),
                 new Vector3D(0, 3.0 * _formDistance, 0),
@@ -231,8 +213,6 @@ namespace IngameScript
                 new Vector3D(3.0 * Cos45 * _formDistance, -3.0 * Cos45 * _formDistance, 0),
                 new Vector3D(-3.0 * Cos45 * _formDistance, 3.0 * Cos45 * _formDistance, 0),
                 new Vector3D(-3.0 * Cos45 * _formDistance, -3.0 * Cos45 * _formDistance, 0),
-
-                // Ring 4
                 new Vector3D(4.5 * _formDistance, 0, 0),
                 new Vector3D(-4.5 * _formDistance, 0, 0),
                 new Vector3D(0, 4.5 * _formDistance, 0),
@@ -242,17 +222,14 @@ namespace IngameScript
                 new Vector3D(-4.5 * Cos45 * _formDistance, 4.5 * Cos45 * _formDistance, 0),
                 new Vector3D(-4.5 * Cos45 * _formDistance, -4.5 * Cos45 * _formDistance, 0)
             },
-            new[] // Sphere
+            new[] // Sphere formation
             {
-                // Max 14
-
                 new Vector3D(_formDistance, 0, 0),
                 new Vector3D(-_formDistance, 0, 0),
                 new Vector3D(0, _formDistance, 0),
                 new Vector3D(0, -_formDistance, 0),
                 new Vector3D(0, 0, _formDistance),
                 new Vector3D(0, 0, -_formDistance),
-
                 new Vector3D(Cos45 * _formDistance, Cos45 * _formDistance, 0),
                 new Vector3D(Cos45 * _formDistance, -Cos45 * _formDistance, 0),
                 new Vector3D(-Cos45 * _formDistance, Cos45 * _formDistance, 0),
@@ -262,7 +239,7 @@ namespace IngameScript
                 new Vector3D(0, -Cos45 * _formDistance, Cos45 * _formDistance),
                 new Vector3D(0, -Cos45 * _formDistance, -Cos45 * _formDistance)
             },
-            new[] // V
+            new[] // V formation
             {
                 new Vector3D(_formDistance / 2.0, 0, -_formDistance / 2.0),
                 new Vector3D(-_formDistance / 2.0, 0, -_formDistance / 2.0),
@@ -286,42 +263,36 @@ namespace IngameScript
             },
         };
 
+        // Combat and movement variables
         string _damageAmmo = "";
         string _healAmmo = "";
         bool _healMode;
-
         MatrixD _ctrlMatrix;
         bool _isFortified;
         bool _isIntegrity;
         ITerminalAction _toggleFort;
         ITerminalAction _toggleIntegrity;
-        Vector3D _predictedTargetPos; // target position + lead
-        Vector3D _controllerPos; // center of controller ship
-
-        Vector3D
-            _anchorVelocity; // velocity of "anchored" target; controller if in WINGMAN mode, target if in MAIN mode.
-
+        Vector3D _predictedTargetPos;
+        Vector3D _controllerPos;
+        Vector3D _anchorVelocity;
         Vector3D _closestCollision;
         Vector3D _ctrlTargetPos;
         double _totalRuntime = 0;
         Vector3D _resultPos;
         double _distanceTarget = 0;
         bool _hasABs = false;
-
         double _speed;
-        int _id = -1; // Per-drone ID. Used for formation flight. Controller is always -1
-
-        double _totalSwarmRuntime = 0; // Sum of all drone runtimes this frame
-        int _swarmDroneCount = 0; // Number of drones that reported performance this frame
-        double _averageSwarmRuntimeMs; // Rolling average of swarm performance
-        List<double> _currentFrameRuntimes = new List<double>(); // Store runtimes for current frame
-
+        int _id = -1;
+        double _totalSwarmRuntime = 0;
+        int _swarmDroneCount = 0;
+        double _averageSwarmRuntimeMs;
+        List<double> _currentFrameRuntimes = new List<double>();
         double _lastSwarmCalculation = 0;
         int _performanceCalculationFrame = 0;
 
         #endregion
 
-        #region Blocks
+        #region Blocks - Made public for docking manager access
 
         List<IMyTerminalBlock> _allABs = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> _forwardAb = new List<IMyTerminalBlock>();
@@ -332,38 +303,29 @@ namespace IngameScript
         List<IMyTerminalBlock> _rightAb = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> _fixedGuns = new List<IMyTerminalBlock>();
         List<IMyTerminalBlock> _flares = new List<IMyTerminalBlock>();
-        List<IMyThrust> _allThrust = new List<IMyThrust>();
+        public List<IMyThrust> _allThrust = new List<IMyThrust>();
         IMyRadioAntenna _antenna;
 
         IMyTerminalBlock _shieldController;
         IMyTerminalBlock _shieldModulator;
 
-        /*
-         * 0 forward
-         * 1 back
-         * 2 up
-         * 3 down
-         * 4 right
-         * 5 left
-         */
         double[] _thrustAmt = new double[6];
-        List<IMyThrust> _forwardThrust = new List<IMyThrust>();
-        List<IMyThrust> _backThrust = new List<IMyThrust>();
-        List<IMyThrust> _upThrust = new List<IMyThrust>();
-        List<IMyThrust> _downThrust = new List<IMyThrust>();
-        List<IMyThrust> _leftThrust = new List<IMyThrust>();
-        List<IMyThrust> _rightThrust = new List<IMyThrust>();
+        public List<IMyThrust> _forwardThrust = new List<IMyThrust>();
+        public List<IMyThrust> _backThrust = new List<IMyThrust>();
+        public List<IMyThrust> _upThrust = new List<IMyThrust>();
+        public List<IMyThrust> _downThrust = new List<IMyThrust>();
+        public List<IMyThrust> _leftThrust = new List<IMyThrust>();
+        public List<IMyThrust> _rightThrust = new List<IMyThrust>();
 
         List<IMyTextPanel> _outLcds = new List<IMyTextPanel>();
 
         Dictionary<string, int> _weaponMap = new Dictionary<string, int>();
-
         Dictionary<IMyTerminalBlock, Dictionary<string, int>> _cachedWeaponMaps =
             new Dictionary<IMyTerminalBlock, Dictionary<string, int>>();
 
         int _weaponMapUpdateFrame = 0;
         int _targetUpdateTimer;
-        const int TargetUpdateInterval = 10; // Update every 10 ticks
+        const int TargetUpdateInterval = 10;
         bool _hasShield;
         int _shieldCheckFrame = 0;
 
@@ -377,7 +339,6 @@ namespace IngameScript
         bool _pendingRecovery = false;
 
         #endregion
-
 
         public Program()
         {
@@ -409,6 +370,10 @@ namespace IngameScript
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
+            // Store our grid entity ID for safety checks
+            _gridEntityId = Me.CubeGrid.EntityId;
+            GridId = _gridEntityId;
+
             // Init Targeting class
             if (TargetingHelper.WcPbApiExists(Me))
                 _targeting = new WCTargetingHelper(this);
@@ -421,15 +386,18 @@ namespace IngameScript
             Echo("Initialized dsAPI");
 
             // Init Debug Draw API
-
             _d = new DebugAPI(this);
             Echo("Initialized debugAPI");
 
+            // Initialize Docking Manager
+            _dockingManager = new DockingManager(this, _dockingTag);
+            _dockingManager.Initialize();
+            Echo("Initialized Docking Manager");
 
-            // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
+            // Squares zoneRadius to avoid Vector3D.Distance() calls
             _zoneRadius *= _zoneRadius;
 
-            // Force clear all WC-related caches that might be from a copied drone
+            // Force clear all WC-related caches
             _weaponMap.Clear();
             _cachedWeaponMaps.Clear();
             _cachedAmmoLeadPositions.Clear();
@@ -439,13 +407,11 @@ namespace IngameScript
 
             if (!_isController)
             {
-                // Check for existing group config
                 if (Me.CustomData == "" || Me.CustomData.Length > 2) Me.CustomData = "1";
                 int.TryParse(Me.CustomData, out _group);
                 if (_group == -1)
                 {
-                    _isController =
-                        true; // IK this looks dumb. Goal is to make sure isController doesn't get accidentally set to false.
+                    _isController = true;
                     _group = 0;
                 }
             }
@@ -454,42 +420,41 @@ namespace IngameScript
             Echo($"Checked customdata for group ({_group})");
 
             // Init Whip's GPS Gyro Control
-            GridId = Me.CubeGrid.EntityId;
             _gyros = new GyroControl(this, Me, _kP, _kI, _kD, _lowerBound, _upperBound, _timeStep);
             Echo("Initialized Whip's Gyro Control");
 
-            long droneGridId = Me.CubeGrid.EntityId;
-
-            // Get cockpit for controller
+            // Get cockpit for controller - ONLY on our grid
             GridTerminalSystem.GetBlocksOfType<IMyCockpit>(null, b =>
             {
-                if (b.CubeGrid.EntityId == droneGridId)
+                if (b.CubeGrid.EntityId == _gridEntityId)
                 {
                     _cockpit = b;
                     return true;
                 }
-
                 return false;
             });
             Echo("Searched for cockpit on own grid " + (_cockpit == null ? "null" : _cockpit.CustomName));
 
-            // Gets shield controllers. Also disables autofortify if no shield controllers are found.
+            // Get shield components - ONLY on our grid
             List<IMyTerminalBlock> shieldControllers = new List<IMyTerminalBlock>();
             List<IMyTerminalBlock> shieldModulators = new List<IMyTerminalBlock>();
             bool hasEnhancer = false;
+            
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(shieldControllers, b =>
             {
-                if (b.CubeGrid.EntityId != droneGridId) return false;
+                if (b.CubeGrid.EntityId != _gridEntityId) return false;
                 if (!hasEnhancer) hasEnhancer = b.DefinitionDisplayNameText.Contains("Enhancer");
                 return b.CustomName.Contains("Shield Controller");
             });
             Echo($"Located {shieldControllers.Count} shield controllers");
+            
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(shieldModulators,
-                b => { return b.CubeGrid.EntityId == droneGridId && b.CustomName.Contains("Shield Modulator"); });
+                b => { return b.CubeGrid.EntityId == _gridEntityId && b.CustomName.Contains("Shield Modulator"); });
             Echo($"Located {shieldModulators.Count} shield modulators");
+            
             if (_autoFortify) _autoFortify = hasEnhancer;
 
-            // Check if shield controller exists, set up shortcut actions for Fortify and Integrity.
+            // Set up shield actions
             try
             {
                 _shieldController = shieldControllers[0];
@@ -505,7 +470,6 @@ namespace IngameScript
                 Echo("No shield controller!");
             }
 
-            // Check if shield controller exists, set up shortcut actions for Fortify and Integrity.
             try
             {
                 _shieldModulator = shieldModulators[0];
@@ -522,44 +486,41 @@ namespace IngameScript
                 Echo("No shield modulator!");
             }
 
-            // Autosets mass if ship controller detected
+            // Auto-set mass if ship controller detected - ONLY on our grid
             GridTerminalSystem.GetBlocksOfType<IMyShipController>(null, b =>
             {
-                if (b.CubeGrid.EntityId == droneGridId)
+                if (b.CubeGrid.EntityId == _gridEntityId)
                 {
                     _mass = b.CalculateShipMass().TotalMass;
                     return true;
                 }
-
                 return false;
             });
             Echo("Set grid mass to " + _mass);
 
-            // Set antenna ranges to 25k (save a tiny bit of power)
+            // Set antenna ranges - ONLY on our grid
             GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(null, b =>
             {
-                if (b.CubeGrid.EntityId == droneGridId)
+                if (b.CubeGrid.EntityId == _gridEntityId)
                 {
                     b.Radius = 25000;
                     _antenna = b;
                     return true;
                 }
-
                 return false;
             });
             Echo("Set antenna radii to 25km");
 
-            // Get LCDs with name containing 'Rocketman' and sets them up
+            // Get LCDs - ONLY on our grid
             if (_isController || _debug)
                 GridTerminalSystem.GetBlocksOfType(_outLcds, b =>
-                    b.CubeGrid.EntityId == droneGridId && b.CustomName.ToLower().Contains("rocketman"));
+                    b.CubeGrid.EntityId == _gridEntityId && b.CustomName.ToLower().Contains("rocketman"));
 
             foreach (var l in _outLcds)
             {
                 l.ContentType = ContentType.TEXT_AND_IMAGE;
                 if (!l.CustomData.Contains("hudlcd")) l.CustomData = "hudlcd";
             }
-
             Echo($"Found {_outLcds.Count} LCDs");
 
             // Get fixed guns
@@ -576,11 +537,9 @@ namespace IngameScript
             {
                 _doCcrp = false;
             }
-
             Echo($"Found {_fixedGuns.Count} fixed weapons");
 
-            Echo($"Found {_fixedGuns.Count} fixed weapons");
-
+            // Learn ammo types
             try
             {
                 if (_fixedGuns.Count > 0)
@@ -592,9 +551,7 @@ namespace IngameScript
                         splitCustomData = b.CustomData.Split('\n');
                         _healAmmo = splitCustomData[0];
                         _damageAmmo = splitCustomData[1];
-
-                        Echo(
-                            $"Set ammo types to:\n    HEAL - {_healAmmo}\n    DAMAGE - {_damageAmmo}");
+                        Echo($"Set ammo types to:\n    HEAL - {_healAmmo}\n    DAMAGE - {_damageAmmo}");
                     }
                 }
             }
@@ -612,27 +569,24 @@ namespace IngameScript
             {
                 Echo("No afterburners detected!");
             }
-
             Echo($"Found {_allABs.Count} afterburners");
 
-            // Sort afterburners
             RecalcABs();
             Echo($"Sorted {_allABs.Count} afterburners");
 
-            // Get all thrust
-            GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid == Me.CubeGrid);
+            // Get all thrust - ONLY on our grid
+            GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == _gridEntityId);
             Echo($"Found {_allThrust.Count} thrusters on own grid");
 
-            // Sort thrust and calculate total thrust per direction
             RecalcThrust();
             Echo($"Sorted {_allThrust.Count} thrusters");
 
-            // Set gyro and thrust override to 0
+            // Reset controls
             _gyros.Reset();
             SetThrust(-1f, _allThrust, false);
             Echo("Reset thrust and gyro control");
 
-            // Init IGC (Inter-Grid Communications) listener
+            // Init IGC listeners
             _myBroadcastListener = IGC.RegisterBroadcastListener(_isController ? "-1" : _group.ToString());
             Echo("Inited myBroadcastListener");
 
@@ -648,11 +602,19 @@ namespace IngameScript
             _performanceListener = IGC.RegisterBroadcastListener("per");
             Echo("Inited performanceListener");
 
+            // Initialize docking host listeners if we're a controller
+            if (_isController)
+            {
+                _dockingPingListener = IGC.RegisterBroadcastListener("NETWORK_DISCOVERY_PING");
+                _dockingPingListener.SetMessageCallback("DOCKING_IGC_Update");
+                Echo("Inited docking host listener");
+            }
+
             _antenna.HudText = "Awaiting " + (_isController ? "Drones!" : "Controller!");
 
             if (_isController)
             {
-                SendGroupMsg<string>("r", true); // Reset drone IDs
+                SendGroupMsg<string>("r", true);
                 SendGroupMsg<string>("m" + _mainDistance, true);
                 SendGroupMsg<string>("o" + _formDistance, true);
                 Echo("Reset drone IDs and shared formation distances");
@@ -667,11 +629,9 @@ namespace IngameScript
                 // ignored
             }
 
-            // Convert maxOffset from human-readable format to dot product
             _maxOffset = Math.Cos(_maxOffset / 57.2957795);
             Echo("Set maxOffset to " + _maxOffset);
 
-            // Cache flares for later use
             try
             {
                 _targeting.GetWeapons(_flares, _flareGroupName);
@@ -682,25 +642,11 @@ namespace IngameScript
             }
 
             _minMissileAge *= 60;
-
             Echo("AutoFlare module initialized\n" + _flares.Count + " flares detected");
 
-            // Sets PB surface to text for error reporting.
-            // Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
-
-            GridId = Me.CubeGrid.EntityId;
             _frame = 0;
-
-            Echo("Successfully initialized as a " + (_isController ? "controller." : "drone.") +
-                 "");
-
-            // Clear any stale targeting data
-            // aiTarget = new MyDetectedEntityInfo();
-
-            GridId = Me.CubeGrid.EntityId;
-            Echo($"Drone initialized on grid entity ID: {GridId}");
+            Echo("Successfully initialized as a " + (_isController ? "controller." : "drone.") + "");
         }
-
 
         int _errorCounter;
 
@@ -714,28 +660,95 @@ namespace IngameScript
             _averageRuntimeMs = RuntimeSignificance * Runtime.LastRunTimeMs +
                                (1 - RuntimeSignificance) * _averageRuntimeMs;
 
+            // Handle docking and recovery commands
+            if (!string.IsNullOrEmpty(argument))
+            {
+                switch (argument.ToLower())
+                {
+                    case "dock":
+                    case "autodock":
+                        if (!_isController) // Only drones can initiate docking
+                        {
+                            if (_dockingManager.StartDocking())
+                            {
+                                Echo("Starting docking sequence...");
+                                Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                            }
+                            else
+                            {
+                                Echo("Failed to start docking - check connector and controller tags");
+                            }
+                        }
+                        else
+                        {
+                            Echo("Controllers cannot initiate docking - they receive docking requests");
+                        }
+                        return;
+                    case "abortdock":
+                    case "stopdock":
+                        _dockingManager.AbortDocking();
+                        Echo("Docking aborted");
+                        return;
+                    case "refreshdocks":
+                        if (_isController)
+                        {
+                            InitializeDockingHost();
+                            Echo("Docking connectors refreshed");
+                        }
+                        return;
+                    case "DOCKING_IGC_Update":
+                        if (_isController)
+                        {
+                            ProcessDockingHostMessages();
+                        }
+                        return;
+                }
+            }
+
+            // Handle recovery commands
             if (!string.IsNullOrEmpty(argument) &&
                 (argument == "recover" || argument == "recycle" || argument == "reset"))
             {
                 if (_isController)
                 {
-                    // Broadcast the recover command to all drones
                     SendGroupMsg<string>("recover", true);
-                    // Also broadcast to the general channel for any unassigned drones
                     IGC.SendBroadcastMessage("-1", "recover");
                 }
-
                 RecoverDrone();
                 return;
             }
-            else if ((!_isController || _mode == 1) && !_activated)
+            else if ((!_isController || _mode == 1) && !_activated && !_dockingManager.IsDocking)
             {
                 Runtime.UpdateFrequency = UpdateFrequency.Update100;
             }
 
-
             _d.RemoveAll();
 
+            // Update docking system - NO THROTTLING for docking operations
+            if (_dockingManager.IsDocking)
+            {
+                _dockingManager.Update();
+                OutText += _dockingManager.GetStatusText() + "\n";
+                
+                // Check if docking completed successfully
+                if (!_dockingManager.IsDocking && _mode == 3)
+                {
+                    // Docking finished - drone becomes inactive until given new orders
+                    _activated = false;
+                    _mode = 1; // Reset to wingman mode for future commands
+                    _antenna.HudText = _id.ToString() + " | DOCKED";
+                    Runtime.UpdateFrequency = UpdateFrequency.Update100;
+                    Echo("Docking complete - drone now inactive");
+                }
+                
+                // Always update LCDs during docking for real-time feedback
+                foreach (var l in _outLcds)
+                    l.WriteText(OutText);
+                
+                OutText = "";
+                _frame++;
+                return;
+            }
 
             // Update last controller ping
             if (IgcHandler(updateSource))
@@ -751,36 +764,29 @@ namespace IngameScript
             }
 
             // Status info
-            OutText +=
-                $"M{_mode} : G{_group} : ID{_id} {(_activated ? "ACTIVE" : "INACTIVE")} {IndicateRun()}\n";
-            OutText +=
-                $"Runtime: {Runtime.LastRunTimeMs:F2}ms | Avg: {_averageRuntimeMs:F2}ms | Limit: {_runtimeThreshold}ms\n";
-            OutText +=
-                $"\nRocketman Drone Manager\n-------------------------\n{(_isController ? $"Controlling {_droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+            OutText += $"M{_mode} : G{_group} : ID{_id} {(_activated ? "ACTIVE" : "INACTIVE")} {(_dockingManager.IsDocking ? "DOCKING" : "")} {IndicateRun()}\n";
+            OutText += $"Runtime: {Runtime.LastRunTimeMs:F2}ms | Avg: {_averageRuntimeMs:F2}ms | Limit: {_runtimeThreshold}ms\n";
+            OutText += $"\nRocketman Drone Manager\n-------------------------\n{(_isController ? $"Controlling {_droneEntities.Count} drone(s)" : "Drone Mode")}\n";
 
             // If ID unset and is not controller, ping controller for ID.
             if (_id == -1 && !_isController)
             {
                 _activated = false;
-                IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
+                IGC.SendBroadcastMessage("-1", "e" + _gridEntityId); // Use our stored grid ID
                 return;
             }
 
-            if (_activated) // Generic "I'm on!" stuff
+            if (_activated)
             {
                 try
                 {
-                    // ALWAYS do these critical operations regardless of performance
                     _centerOfGrid = Me.CubeGrid.GetPosition();
 
-                    // Smart throttling - spread work across frames when performance is poor
                     bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
-                    int throttleFrames = isThrottled ? 6 : 1; // Spread work across 6 frames when throttled
+                    int throttleFrames = isThrottled ? 6 : 1;
 
-                    // Frame-distributed operations (only when throttled)
                     if (!isThrottled || (_frame % throttleFrames) == 0)
                     {
-                        // Only update targeting every 10 ticks (or less frequently if throttled)
                         int targetingInterval = isThrottled ? TargetUpdateInterval * 3 : TargetUpdateInterval;
                         if (_targetUpdateTimer++ >= targetingInterval)
                         {
@@ -794,12 +800,10 @@ namespace IngameScript
                         if (!_healMode)
                         {
                             var currentTarget = _targeting.Target;
-                            // Only update aiTarget if we have a valid target from the targeting system
                             if (!currentTarget.IsEmpty())
                             {
                                 _aiTarget = currentTarget;
                             }
-                            // If targeting system has no target but we previously had one, clear it
                             else if (currentTarget.IsEmpty() && !_aiTarget.IsEmpty())
                             {
                                 _aiTarget = new MyDetectedEntityInfo();
@@ -813,7 +817,6 @@ namespace IngameScript
                     {
                         OutText += "Velocity " + _speed + "\n";
 
-                        // Update speed and auto-systems less frequently when throttled
                         int systemUpdateInterval = isThrottled ? 120 : 60;
                         if (_frame % systemUpdateInterval == 0)
                         {
@@ -825,22 +828,20 @@ namespace IngameScript
 
                     if (!isThrottled || (_frame % throttleFrames) == 3)
                     {
-                        if (_isController) // If on AND is controller, Update drones with new instructions/positions
+                        if (_isController)
                         {
                             IgcSendHandler();
                             UpdateSwarmPerformanceAverage();
+                            // Process docking host messages for controllers
+                            ProcessDockingHostMessages();
                         }
                     }
                     
-                    if (!_isController) //throttling this will make it impossible to aim fug
+                    if (!_isController)
                     {
-                        //if (!isThrottled || (frame % throttleFrames) == 4)
-                        //{
-                            RunActiveDrone();
-                        //}
+                        RunActiveDrone();
                     }
 
-                    // Add throttling indicator to output
                     if (isThrottled)
                     {
                         OutText += $"THROTTLED ({throttleFrames}x slower)\n";
@@ -848,7 +849,6 @@ namespace IngameScript
 
                     _errorCounter = 0;
                 }
-                // Scary error handling
                 catch (Exception e)
                 {
                     if (_errorCounter > 10)
@@ -870,7 +870,7 @@ namespace IngameScript
                     DrawLeadDebugs();
             }
 
-            // Check for WeaponCore issues in active drones
+            // Check for WeaponCore issues
             if (_activated && !_doCcrp && _fixedGuns.Count > 0 &&
                 _frame % (_averageRuntimeMs > _runtimeThreshold ? 120 : 60) == 0)
             {
@@ -878,24 +878,17 @@ namespace IngameScript
                 ReinitializeWeaponCore();
             }
 
-            // Auto-detect if we might be a copy with conflicting ID
+            // Auto-detect copied drones
             if (_activated && _id != -1 && !_isController &&
                 _frame % (_averageRuntimeMs > _runtimeThreshold ? 600 : 300) == 0)
             {
-                // Check if our stored grid ID doesn't match our actual grid ID
-                if (GridId != Me.CubeGrid.EntityId)
+                if (GridId != _gridEntityId)
                 {
                     Echo("Grid ID mismatch detected - likely a copied drone!");
-                    Echo($"Stored ID: {GridId}, Actual ID: {Me.CubeGrid.EntityId}");
+                    Echo($"Stored ID: {GridId}, Actual ID: {_gridEntityId}");
                     RecoverDrone();
                     return;
                 }
-            }
-
-            if (_activated && !_doCcrp && _fixedGuns.Count > 0)
-            {
-                Echo("WeaponCore not active but weapons present - attempting recovery");
-                ReinitializeWeaponCore();
             }
 
             if (_averageRuntimeMs < _runtimeThreshold)
@@ -905,15 +898,13 @@ namespace IngameScript
             }
 
             OutText = "";
-
             _frame++;
         }
 
         void RecoverDrone()
         {
-            Echo("nitiating drone recovery...");
+            Echo("Initiating drone recovery...");
 
-            // Reset core drone state
             _id = -1;
             _activated = false;
             _lastControllerPing = 0;
@@ -923,40 +914,34 @@ namespace IngameScript
             _droneEntities.Clear();
             _friendlies.Clear();
 
-            // Reset control systems
             if (_gyros != null) _gyros.Reset();
             SetThrust(-1f, _allThrust, false);
 
-            // Reinitialize WeaponCore
             ReinitializeWeaponCore();
 
-            // Reset grid tracking
-            GridId = Me.CubeGrid.EntityId;
+            // Update grid tracking with current entity ID
+            _gridEntityId = Me.CubeGrid.EntityId;
+            GridId = _gridEntityId;
 
-            // Reinitialize communication listeners
+            // Reinitialize communication
             _myBroadcastListener = IGC.RegisterBroadcastListener(_isController ? "-1" : _group.ToString());
             _positionListener = IGC.RegisterBroadcastListener("pos" + (_multipleControllers ? _group.ToString() : ""));
             _velocityListener = IGC.RegisterBroadcastListener("vel" + (_multipleControllers ? _group.ToString() : ""));
             _orientListener = IGC.RegisterBroadcastListener("ori" + (_multipleControllers ? _group.ToString() : ""));
             _performanceListener = IGC.RegisterBroadcastListener("per");
 
-            // Update status
             if (_antenna != null) _antenna.HudText = "Recovery Complete - Ready for Combat!";
 
-            // Announce presence to controller (important for copied drones)
-            IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
-
-            // Reset frame counter
+            IGC.SendBroadcastMessage("-1", "e" + _gridEntityId);
             _frame = 0;
 
-            Echo("Drone recovery completed - Grid ID: " + GridId + "");
+            Echo("Drone recovery completed - Grid ID: " + GridId);
         }
 
         void ReinitializeWeaponCore()
         {
             Echo("Reinitializing WeaponCore systems...");
 
-            // Clear existing weapon data
             _fixedGuns.Clear();
             _allABs.Clear();
             _flares.Clear();
@@ -964,10 +949,8 @@ namespace IngameScript
             _cachedWeaponMaps.Clear();
             _cachedAmmoLeadPositions.Clear();
 
-            // Reset WeaponCore state
             _doCcrp = true;
 
-            // Reinitialize targeting helper
             try
             {
                 if (TargetingHelper.WcPbApiExists(Me))
@@ -981,7 +964,6 @@ namespace IngameScript
                 Echo("Failed to reinitialize targeting: " + e.Message);
             }
 
-            // Reinitialize weapons with retry logic
             int retryCount = 0;
             bool wcInitSuccess = false;
 
@@ -989,15 +971,12 @@ namespace IngameScript
             {
                 try
                 {
-                    // Get weapons
                     _targeting.GetWeapons(_fixedGuns, _gunGroupName);
                     Echo($"Found {_fixedGuns.Count} weapons");
 
-                    // Initialize WeaponCore API if we have weapons
                     if (_fixedGuns.Count > 0 && _targeting is WCTargetingHelper)
                     {
                         WCTargetingHelper wcTargeting = (WCTargetingHelper)_targeting;
-
                         wcTargeting.wAPI.GetBlockWeaponMap(_fixedGuns.First(), _weaponMap);
                         Echo($"WeaponCore initialized with {_weaponMap.Count} weapon mappings");
                         wcInitSuccess = true;
@@ -1007,7 +986,7 @@ namespace IngameScript
                     {
                         Echo("No weapons found - disabling CCRP");
                         _doCcrp = false;
-                        wcInitSuccess = true; // Not an error, just no weapons
+                        wcInitSuccess = true;
                     }
                 }
                 catch (Exception e)
@@ -1018,24 +997,20 @@ namespace IngameScript
                     {
                         Echo("WeaponCore initialization failed after 3 attempts - disabling CCRP");
                         _doCcrp = false;
-                        wcInitSuccess = true; // Stop retrying
+                        wcInitSuccess = true;
                     }
                 }
             }
 
-            // Initialize other weapon systems
             try
             {
-                // Get afterburners
                 _targeting.GetWeapons(_allABs, _abGroupName);
                 Echo($"Found {_allABs.Count} afterburners");
                 RecalcABs();
 
-                // Get flares
                 _targeting.GetWeapons(_flares, _flareGroupName);
                 Echo($"Found {_flares.Count} flares");
 
-                // Reset ammo settings
                 if (_fixedGuns.Count > 0)
                 {
                     string[] splitCustomData;
@@ -1057,11 +1032,273 @@ namespace IngameScript
             Echo("WeaponCore reinitialization complete");
         }
 
+        // Docking Host Functionality (for controllers)
+        void InitializeDockingHost()
+        {
+            if (!_isController) return;
+
+            _hostConnectors.Clear();
+            
+            // Get all connectors with the docking tag on our grid only
+            GridTerminalSystem.GetBlocksOfType<IMyShipConnector>(_hostConnectors, 
+                block => block.CustomName.Contains(_dockingTag) && 
+                         block.CubeGrid.EntityId == _gridEntityId);
+
+            Echo($"Found {_hostConnectors.Count} host docking connectors");
+
+            // Disable connectors that are not locked or in proximity to free them up
+            foreach (IMyShipConnector connector in _hostConnectors)
+            {
+                MyShipConnectorStatus status = connector.Status;
+                if (status == MyShipConnectorStatus.Unconnected || 
+                    status == MyShipConnectorStatus.Connectable)
+                {
+                    connector.Enabled = false;
+                }
+            }
+        }
+
+        void ProcessDockingHostMessages()
+        {
+            if (!_isController) return;
+
+            // Process incoming PINGS for docking discovery
+            while (_dockingPingListener.HasPendingMessage)
+            {
+                MyIGCMessage message = _dockingPingListener.AcceptMessage();
+                if (message.Tag == "NETWORK_DISCOVERY_PING" && message.Data.ToString() == "PING")
+                {
+                    // Don't respond to our own messages or messages from same grid
+                    if (message.Source == IGC.Me || AreBlocksOnSameGrid(message.Source, Me)) 
+                        continue;
+
+                    OutText += $"Docking ping received from: {message.Source}\n";
+
+                    // Send response with our grid info
+                    var responsePacket = new MyTuple<string, long, Vector3D>(
+                        Me.CubeGrid.CustomName, 
+                        IGC.Me, 
+                        Me.GetPosition()
+                    );
+                    IGC.SendUnicastMessage(message.Source, "NETWORK_DISCOVERY_PONG", responsePacket);
+                    
+                    // Refresh connectors when someone is looking for docking
+                    InitializeDockingHost();
+                }
+            }
+
+            // Process docking requests through unicast
+            while (IGC.UnicastListener.HasPendingMessage)
+            {
+                MyIGCMessage message = IGC.UnicastListener.AcceptMessage();
+                if (message.Tag == "NETWORK_DOCKINGREQUEST")
+                {
+                    Vector3D requestingShipPosition = (Vector3D)message.Data;
+                    IMyShipConnector assignedConnector = GetAvailableHostConnector(requestingShipPosition);
+                    
+                    if (assignedConnector != null)
+                    {
+                        OutText += $"Assigned connector {assignedConnector.CustomName} to {message.Source}\n";
+                        
+                        // Get connector orientation info
+                        Vector3D connectorPos = assignedConnector.GetPosition();
+                        MatrixD worldMatrix = assignedConnector.WorldMatrix;
+                        Vector3D connectorUp = worldMatrix.Up;
+                        Vector3D connectorForward = worldMatrix.Forward;
+
+                        // Send success response
+                        var responsePacket = new MyTuple<bool, Vector3D, Vector3D, Vector3D>(
+                            true, connectorPos, connectorUp, connectorForward
+                        );
+                        IGC.SendUnicastMessage(message.Source, "NETWORK_DOCKINGREQUEST", responsePacket);
+                    }
+                    else
+                    {
+                        OutText += $"No available connectors for {message.Source}\n";
+                        
+                        // Send failure response
+                        var responsePacket = new MyTuple<bool, Vector3D, Vector3D, Vector3D>(
+                            false, Vector3D.Zero, Vector3D.Zero, Vector3D.Zero
+                        );
+                        IGC.SendUnicastMessage(message.Source, "NETWORK_DOCKINGREQUEST", responsePacket);
+                    }
+                }
+            }
+        }
+
+        IMyShipConnector GetAvailableHostConnector(Vector3D requestingShipPosition)
+        {
+            if (!_isController) return null;
+
+            List<IMyShipConnector> availableConnectors = new List<IMyShipConnector>();
+
+            // Find all disabled (available) connectors on our grid
+            foreach (IMyShipConnector connector in _hostConnectors)
+            {
+                // Only consider connectors on our grid
+                if (connector.CubeGrid.EntityId != _gridEntityId) continue;
+                
+                MyShipConnectorStatus status = connector.Status;
+                if (!connector.Enabled && 
+                    (status == MyShipConnectorStatus.Unconnected || 
+                     status == MyShipConnectorStatus.Connectable))
+                {
+                    availableConnectors.Add(connector);
+                }
+            }
+
+            if (availableConnectors.Count == 0)
+                return null;
+
+            // Find the closest available connector
+            IMyShipConnector closestConnector = null;
+            double closestDistance = double.MaxValue;
+
+            foreach (IMyShipConnector connector in availableConnectors)
+            {
+                double distance = Vector3D.Distance(connector.GetPosition(), requestingShipPosition);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestConnector = connector;
+                }
+            }
+
+            // Enable the selected connector to reserve it
+            if (closestConnector != null)
+            {
+                closestConnector.Enabled = true;
+                Echo($"Reserved connector: {closestConnector.CustomName}");
+            }
+
+            return closestConnector;
+        }
+
+        bool AreBlocksOnSameGrid(long blockId1, IMyTerminalBlock block2)
+        {
+            IMyTerminalBlock block1 = GridTerminalSystem.GetBlockWithId(blockId1);
+
+            if (block1 == null || block2 == null)
+                return false;
+
+            return block1.CubeGrid.EntityId == block2.CubeGrid.EntityId;
+        }
+
+        // Make CalcStopPosition and ThrustControl public for docking manager
+        public Vector3D CalcStopPosition(Vector3D velocity, Vector3D gridCenter)
+        {
+            if (!IsValidVector(velocity) || !IsValidVector(gridCenter))
+            {
+                return gridCenter;
+            }
+
+            Vector3D accel = new Vector3D(_thrustAmt[4], _thrustAmt[2], -_thrustAmt[0]) / _mass;
+            Vector3D accelR = new Vector3D(-_thrustAmt[5], -_thrustAmt[3], _thrustAmt[1]) / _mass;
+
+            if (!IsValidVector(accel) || !IsValidVector(accelR))
+            {
+                return gridCenter;
+            }
+
+            Vector3D rVelocity = Vector3D.Rotate(velocity, Me.WorldMatrix);
+
+            if (!IsValidVector(rVelocity))
+            {
+                return gridCenter;
+            }
+
+            Vector3D timeToStop = new Vector3D(
+                Math.Abs(accel.X) > 0.001 && Math.Abs(accelR.X) > 0.001
+                    ? (accel.X + rVelocity.X < rVelocity.X - accelR.X ? rVelocity.X / accel.X : rVelocity.X / accelR.X)
+                    : 0,
+                Math.Abs(accel.Y) > 0.001 && Math.Abs(accelR.Y) > 0.001
+                    ? (accel.Y + rVelocity.Y < rVelocity.Y - accelR.Y ? rVelocity.Y / accel.Y : rVelocity.Y / accelR.Y)
+                    : 0,
+                Math.Abs(accel.Z) > 0.001 && Math.Abs(accelR.Z) > 0.001
+                    ? (accel.Z + rVelocity.Z < rVelocity.Z - accelR.Z ? rVelocity.Z / accel.Z : rVelocity.Z / accelR.Z)
+                    : 0
+            );
+
+            if (!IsValidVector(timeToStop))
+            {
+                return gridCenter;
+            }
+
+            Vector3D result = gridCenter - (velocity * timeToStop.Length()) / 2;
+
+            if (!IsValidVector(result))
+            {
+                return gridCenter;
+            }
+
+            return result;
+        }
+
+        public void ThrustControl(Vector3D relPos, List<IMyThrust> up, List<IMyThrust> down, List<IMyThrust> left,
+            List<IMyThrust> right, List<IMyThrust> forward, List<IMyThrust> back)
+        {
+            Vector3D tMove = relPos;
+            MatrixD wm = Me.WorldMatrix;
+            tMove = new Vector3D(Vector3D.Dot(tMove, wm.Right), Vector3D.Dot(tMove, wm.Forward),
+                Vector3D.Dot(tMove, wm.Up));
+
+            SetThrust(-tMove.X, right, true);
+            SetThrust(tMove.X, left, true);
+            SetThrust(-tMove.Y, forward, true);
+            SetThrust(tMove.Y, back, true);
+            SetThrust(-tMove.Z, up, true);
+            SetThrust(tMove.Z, down, true);
+
+            if (_hasABs && relPos.LengthSquared() > 10000)
+            {
+                if (tMove.X > 0.25)
+                    foreach (var ab in _leftAb)
+                        _targeting.FireWeapon(ab);
+                if (-tMove.X > 0.25)
+                    foreach (var ab in _rightAb)
+                        _targeting.FireWeapon(ab);
+                if (tMove.Y > 0.25)
+                    foreach (var ab in _forwardAb)
+                        _targeting.FireWeapon(ab);
+                if (-tMove.Y > 0.25)
+                    foreach (var ab in _backAb)
+                        _targeting.FireWeapon(ab);
+                if (tMove.Z > 0.25)
+                    foreach (var ab in _upAb)
+                        _targeting.FireWeapon(ab);
+                if (-tMove.Z > 0.25)
+                    foreach (var ab in _downAb)
+                        _targeting.FireWeapon(ab);
+            }
+        }
+
+        public void SetThrust(double pct, List<IMyThrust> thrusters, bool disable)
+        {
+            float percent = (float)pct;
+            if (thrusters.Count == 0) return;
+            foreach (var thrust in thrusters)
+            {
+                thrust.ThrustOverridePercentage = percent;
+            }
+        }
+
+        // Helper methods
+        private bool IsValidVector(Vector3D vector)
+        {
+            return !double.IsNaN(vector.X) && !double.IsNaN(vector.Y) && !double.IsNaN(vector.Z) &&
+                   !double.IsInfinity(vector.X) && !double.IsInfinity(vector.Y) && !double.IsInfinity(vector.Z);
+        }
+
+        private bool IsValidMatrix(MatrixD matrix)
+        {
+            return IsValidVector(matrix.Forward) && IsValidVector(matrix.Up) && IsValidVector(matrix.Right) &&
+                   IsValidVector(matrix.Translation);
+        }
+
         private void ActiveDroneFrame2()
         {
             _resultPos = _aiTarget.IsEmpty() ? _ctrlTargetPos : _predictedTargetPos;
 
-            // Adjust frame distribution based on performance
             bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
             int frameModulo = isThrottled ? 24 : 6;
 
@@ -1082,11 +1319,9 @@ namespace IngameScript
                         var wcTargeting = (WCTargetingHelper)_targeting;
                         _projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(GridId);
                     }
-
                     break;
             }
 
-            // Extend intervals when throttled but don't double-check performance
             int performanceMultiplier = isThrottled ? 4 : 1;
 
             if (_frame % (60 * performanceMultiplier) == 0)
@@ -1096,7 +1331,6 @@ namespace IngameScript
                 else if (_healMode && _autoTarget)
                     _aiTarget = _friendlies[0];
 
-                // turn off guns if target is missing
                 if (_aiTarget.IsEmpty() && !_healMode)
                     foreach (var weapon in _fixedGuns)
                         Fire(weapon, false);
@@ -1113,12 +1347,11 @@ namespace IngameScript
 
                 if (needsRecalc)
                 {
-                    GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == Me.CubeGrid.EntityId);
+                    GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == _gridEntityId);
                     RecalcThrust();
                     OutText += $"Recalculated thrust with {_allThrust.Count} thrusters";
                 }
 
-                // Revengance status (always check this for safety)
                 if (!(_mode == 0 && _autoTarget))
                 {
                     if (DateTime.Now.Ticks - _lastControllerPing > 100000000)
@@ -1130,7 +1363,6 @@ namespace IngameScript
                 }
             }
 
-            // Cache clearing - much less frequent when throttled
             if (_frame % (300 * performanceMultiplier * 2) == 0)
             {
                 _cachedPredictedPos = new Vector3D();
@@ -1144,7 +1376,6 @@ namespace IngameScript
             OutText += "Locked onto " + _aiTarget.Name + "\n";
             if (_frame % 2 == 0) ActiveDroneFrame2();
 
-            // Calculate throttle state once for the entire method
             bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
 
             Vector3D aimPoint = new Vector3D();
@@ -1188,7 +1419,6 @@ namespace IngameScript
                     }
                 }
 
-                // Rest of targeting logic...
                 if (!hasValidAimPoint && IsValidVector(_aiTarget.Position))
                 {
                     aimPoint = _aiTarget.Position;
@@ -1289,7 +1519,6 @@ namespace IngameScript
                             }
                         }
                     }
-
                     break;
 
                 case 1:
@@ -1379,7 +1608,6 @@ namespace IngameScript
                             }
                         }
                     }
-
                     break;
 
                 case 2:
@@ -1410,11 +1638,9 @@ namespace IngameScript
                             }
                         }
                     }
-
                     break;
             }
 
-            // Final validation before thrust control
             if (IsValidVector(stopPosition) && IsValidVector(moveTo))
             {
                 Vector3D thrustVector = stopPosition - moveTo;
@@ -1426,18 +1652,6 @@ namespace IngameScript
             }
         }
 
-        private bool IsValidVector(Vector3D vector)
-        {
-            return !double.IsNaN(vector.X) && !double.IsNaN(vector.Y) && !double.IsNaN(vector.Z) &&
-                   !double.IsInfinity(vector.X) && !double.IsInfinity(vector.Y) && !double.IsInfinity(vector.Z);
-        }
-
-        private bool IsValidMatrix(MatrixD matrix)
-        {
-            return IsValidVector(matrix.Forward) && IsValidVector(matrix.Up) && IsValidVector(matrix.Right) &&
-                   IsValidVector(matrix.Translation);
-        }
-
         private void PrintDebugText()
         {
             OutText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
@@ -1446,25 +1660,21 @@ namespace IngameScript
             if (_isController)
             {
                 OutText += $"Swarm Avg: {_averageSwarmRuntimeMs:F2}ms | Drones: {_droneEntities.Count}\n";
-                OutText +=
-                    $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm: {(_averageSwarmRuntimeMs / 16.67 * 100):F1}%\n";
+                OutText += $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm: {(_averageSwarmRuntimeMs / 16.67 * 100):F1}%\n";
             }
 
-            // CHANGE THIS PART - send the average runtime instead of current runtime
-            if (_frame % 60 == 0) // Send every second instead of every 4 frames
+            if (_frame % 60 == 0)
             {
                 if (!_isController)
-                    IGC.SendBroadcastMessage("per", _averageRuntimeMs); // Send average instead of current
+                    IGC.SendBroadcastMessage("per", _averageRuntimeMs);
             }
 
             Echo(OutText);
         }
 
-
         public bool IgcHandler(UpdateType updateSource)
         {
             bool wasMessageRecieved = false;
-            // If IGC message recieved
             try
             {
                 while (_myBroadcastListener.HasPendingMessage)
@@ -1492,7 +1702,6 @@ namespace IngameScript
                         _centerOfGrid = Me.CubeGrid.GetPosition();
                         Runtime.UpdateFrequency = UpdateFrequency.Update1;
                     }
-
                     wasMessageRecieved = true;
                 }
 
@@ -1517,10 +1726,8 @@ namespace IngameScript
 
                     if (_isController)
                     {
-                        // Simple: just store the runtimes and calculate average
                         _currentFrameRuntimes.Add(droneAvgRuntime);
                     }
-
                     wasMessageRecieved = true;
                 }
             }
@@ -1536,29 +1743,21 @@ namespace IngameScript
         {
             if (!_isController || _currentFrameRuntimes.Count == 0) return;
 
-            // Simple average of all reported drone average runtimes
             double currentSwarmAverage = _currentFrameRuntimes.Sum();
-
-            // Update rolling average
             _averageSwarmRuntimeMs = currentSwarmAverage;
-
-            // Clear for next batch
             _currentFrameRuntimes.Clear();
         }
 
         public void AutoIntegrity()
         {
-            // AutoIntegrity System
-
             if (_autoIntegrity && _dApi.GridHasShield(Me.CubeGrid) && !_isController)
             {
                 try
                 {
-                    if (_distanceTarget < 40000 &&
-                        !_isIntegrity) // fuck you darkstar (x2). distanceTarget = distance squared.
+                    if (_distanceTarget < 40000 && !_isIntegrity)
                     {
                         _toggleIntegrity.Apply(_shieldModulator);
-                        _isIntegrity = true; // "dead reckoning" system for autointegrity. Breaks if messed with. )))
+                        _isIntegrity = true;
                     }
                     else if (_isIntegrity && _distanceTarget > 40000)
                     {
@@ -1577,7 +1776,6 @@ namespace IngameScript
         {
             if (!_autoFortify) return;
 
-            // Check shield existence every 300 frames (5 seconds)
             if (_frame % 300 == 0)
             {
                 _hasShield = _dApi.GridHasShield(Me.CubeGrid);
@@ -1668,8 +1866,7 @@ namespace IngameScript
             if (_healMode)
             {
                 OutText += "Locked on controller\n";
-                bool isLinedUp = Vector3D.Normalize(_controllerPos - _centerOfGrid).Dot(Me.WorldMatrix.Forward) >
-                                 _maxOffset;
+                bool isLinedUp = Vector3D.Normalize(_controllerPos - _centerOfGrid).Dot(Me.WorldMatrix.Forward) > _maxOffset;
                 foreach (var weapon in _fixedGuns)
                 {
                     if (!isThrottled)
@@ -1709,8 +1906,7 @@ namespace IngameScript
 
                             if (activeAmmo != null && !_cachedAmmoLeadPositions.ContainsKey(activeAmmo))
                             {
-                                Vector3D? predictedPos =
-                                    wcTargeting.wAPI.GetPredictedTargetPosition(weapon, _aiTarget.EntityId, weaponId);
+                                Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(weapon, _aiTarget.EntityId, weaponId);
                                 if (predictedPos.HasValue)
                                 {
                                     _cachedAmmoLeadPositions[activeAmmo] = predictedPos.Value;
@@ -1720,7 +1916,6 @@ namespace IngameScript
                     }
                 }
 
-                // Check alignment and fire weapons using cached maps
                 foreach (var weapon in _fixedGuns)
                 {
                     if (!weapon.IsFunctional || !_cachedWeaponMaps.ContainsKey(weapon)) continue;
@@ -1734,7 +1929,6 @@ namespace IngameScript
                     Fire(weapon, shouldFire);
                 }
 
-                // Debug output
                 if (_frame % 60 == 0 && _cachedAmmoLeadPositions.Count > 0)
                 {
                     OutText += "Ammo Types: ";
@@ -1742,7 +1936,6 @@ namespace IngameScript
                     {
                         OutText += ammo + " ";
                     }
-
                     OutText += "\n";
                 }
             }
@@ -1750,7 +1943,6 @@ namespace IngameScript
 
         private void DrawLeadDebugs()
         {
-            // Draw GPS markers EVERY FRAME using cached positions
             int ammoIndex = 0;
             foreach (var kvp in _cachedAmmoLeadPositions)
             {
@@ -1770,7 +1962,6 @@ namespace IngameScript
 
         private void AutoFlareHandler()
         {
-            // wait 5s between flares
             if (_projectilesLockedOn.Item2 >= _missilesToFlare && _projectilesLockedOn.Item3 > _minMissileAge)
             {
                 foreach (var flare in _flares)
@@ -1825,6 +2016,7 @@ namespace IngameScript
         {
             if (argument == "") return;
 
+            OutText += $"ParseCommands: '{argument}' from {updateSource}\n";
 
             switch (argument)
             {
@@ -1834,6 +2026,7 @@ namespace IngameScript
                     if (_isController)
                         SendGroupMsg<string>("main", false);
                     _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
+                    OutText += "Switched to MAIN mode\n";
                     return;
                 case "wing":
                     _mode = 1;
@@ -1841,6 +2034,7 @@ namespace IngameScript
                     if (_isController)
                         SendGroupMsg<string>("wing", false);
                     _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
+                    OutText += "Switched to WINGMAN mode\n";
                     return;
                 case "fort":
                     _mode = 2;
@@ -1850,11 +2044,10 @@ namespace IngameScript
                         SendGroupMsg<string>("fort", false);
                         IGC.SendBroadcastMessage("pos", _centerOfGrid);
                         MatrixD m = _cockpit.IsFunctional ? _cockpit.WorldMatrix : Me.WorldMatrix;
-
                         IGC.SendBroadcastMessage("ori", m);
                     }
-
                     _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
+                    OutText += "Switched to FORTIFY mode\n";
                     return;
                 case "start":
                     _activated = true;
@@ -1868,18 +2061,16 @@ namespace IngameScript
                             SendGroupMsg<string>("start", true);
                             IGC.SendBroadcastMessage("-1", "start");
                         }
-
                         IGC.SendBroadcastMessage("pos", _centerOfGrid);
-
-                        IGC.SendBroadcastMessage("ori",
-                            _cockpit.IsFunctional ? _cockpit.WorldMatrix : Me.WorldMatrix);
+                        IGC.SendBroadcastMessage("ori", _cockpit.IsFunctional ? _cockpit.WorldMatrix : Me.WorldMatrix);
                     }
-
+                    OutText += "STARTED - Drone activated\n";
                     return;
                 case "group":
                     if (_group < 4) _group++;
                     else _group = 0;
                     _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
+                    OutText += $"Changed to group {_group}\n";
                     return;
                 case "stop":
                     _activated = false;
@@ -1890,17 +2081,72 @@ namespace IngameScript
                         foreach (var weapon in _fixedGuns)
                             Fire(weapon, false);
                     }
-
                     if (_isController && updateSource != UpdateType.IGC)
                     {
                         SendGroupMsg<string>("stop", true);
                         IGC.SendBroadcastMessage("-1", "stop");
                     }
-
+                    OutText += "STOPPED - Drone deactivated\n";
+                    return;
+                case "dock":
+                case "autodock":
+                    OutText += $"DOCK command - isController: {_isController}\n";
+                    if (_isController)
+                    {
+                        // Controller sends dock command to all drones
+                        SendGroupMsg<string>("dock", false);
+                        OutText += "Sent dock command to all drones\n";
+                    }
+                    else
+                    {
+                        OutText += "Drone processing dock command...\n";
+                        // Drone switches to docking mode and starts docking
+                        _mode = 3; // Docking mode
+                        _healMode = false;
+                        _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString() + " DOCKING";
+                        OutText += $"Switched to DOCKING mode (M{_mode})\n";
+                        
+                        if (_dockingManager.StartDocking())
+                        {
+                            OutText += "SUCCESS: Docking sequence started\n";
+                            Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                        }
+                        else
+                        {
+                            OutText += "FAILED: Could not start docking\n";
+                            _mode = 1; // Fall back to wingman mode
+                            _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
+                        }
+                    }
+                    return;
+                case "abortdock":
+                case "stopdock":
+                    OutText += $"ABORT DOCK command - isController: {_isController}\n";
+                    if (_isController)
+                    {
+                        // Controller sends abort dock command to all drones
+                        SendGroupMsg<string>("abortdock", false);
+                        OutText += "Sent abort dock command to all drones\n";
+                    }
+                    else
+                    {
+                        // Drone aborts docking and returns to wingman mode
+                        _dockingManager.AbortDocking();
+                        _mode = 1; // Return to wingman mode
+                        _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
+                        OutText += "Docking aborted - returning to wingman mode\n";
+                    }
+                    return;
+                case "refreshdocks":
+                    if (_isController)
+                    {
+                        InitializeDockingHost();
+                        OutText += "Docking connectors refreshed\n";
+                        SendGroupMsg<string>("refreshdocks", false);
+                    }
                     return;
                 case "heal":
                     _mode = 1;
-
                     if (_isController)
                     {
                         SendGroupMsg<string>("heal", false);
@@ -1915,7 +2161,7 @@ namespace IngameScript
                             wep.SetValue<long>("WC_PickAmmo", 1);
                         }
                     }
-
+                    OutText += "Switched to HEAL mode\n";
                     return;
                 case "learnheal":
                     if (_targeting is WCTargetingHelper)
@@ -1926,12 +2172,10 @@ namespace IngameScript
                             _healAmmo = wcTargeting.wAPI.GetActiveAmmo(w, 0);
                             if (_damageAmmo != "") w.CustomData = _healAmmo + "\n" + _damageAmmo;
                         }
-
-                        Echo("Learned damage ammo " + _healAmmo);
+                        Echo("Learned heal ammo " + _healAmmo);
                     }
                     else
                         Echo("Weaponcore not active!");
-
                     break;
                 case "learndamage":
                     if (_targeting is WCTargetingHelper)
@@ -1942,21 +2186,17 @@ namespace IngameScript
                             _damageAmmo = wcTargeting.wAPI.GetActiveAmmo(w, 0);
                             if (_healAmmo != "") w.CustomData = _healAmmo + "\n" + _damageAmmo;
                         }
-
                         Echo("Learned damage ammo " + _damageAmmo);
                     }
                     else
                         Echo("Weaponcore not active!");
-
                     break;
                 case "ctrlgroup":
                     if (_isController)
                     {
                         SendGroupMsg<string>("c" + Me.CubeGrid.EntityId, false);
                     }
-
                     break;
-
                 case "recover":
                 case "recycle":
                 case "reset":
@@ -1973,29 +2213,17 @@ namespace IngameScript
                 }
             }
 
-
-            /* Internal comms:
-             *  I - Used to set drone ID.        | I(int ID)(long EntityID)
-             *  E - Send EntityID to controller. | E(long EntityID)
-             *  R - Reset drone IDs.             | R
-             *  F - Formation preset.            | F(Int preset)
-             *  O - Set distance from controller.| O(int formDistance)
-             *  M - Set distance from target.    | M(int mainDistance)
-             *
-             */
             switch (argument[0])
             {
                 case 'i':
-                    if (!_isController && long.Parse(argument.Substring(3)) == Me.CubeGrid.EntityId)
+                    if (!_isController && long.Parse(argument.Substring(3)) == _gridEntityId)
                     {
                         _id = int.Parse(argument.Substring(1, 2));
-                        // Clear any stale target data when getting assigned an ID
                         _aiTarget = new MyDetectedEntityInfo();
                         _cachedPredictedPos = new Vector3D();
                         _predictedTargetPos = new Vector3D();
                         _targeting.SetTarget(new MyDetectedEntityInfo());
                     }
-
                     _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
                     break;
                 case 'e':
@@ -2005,238 +2233,93 @@ namespace IngameScript
                         if (!_droneEntities.Contains(tId)) _droneEntities.Add(tId);
                         for (int i = 0; i < _droneEntities.Count; i++)
                         {
-                            SendGroupMsg<string>("i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + _droneEntities[i],
-                                true);
+                            SendGroupMsg<string>("i" + (i < 10 ? "0" + i.ToString() : i.ToString()) + _droneEntities[i], true);
                         }
-
                         _antenna.HudText = _id.ToString() + " | " + _mode.ToString() + _group.ToString();
 
-                        // Send current target to all drones when a new one joins
                         if (_targeting.Target.EntityId != 0)
                         {
                             SendGroupMsg<long>(_targeting.Target.EntityId, true);
                             SendGroupMsg<Vector3D>(_targeting.Target.Position, true);
                         }
                     }
-
                     break;
                 case 'r':
                     if (!_isController)
                     {
                         _id = -1;
                     }
-
                     break;
                 case 'm':
                     if (!_isController)
                     {
                         int.TryParse(argument.Substring(1), out _mainDistance);
                     }
-
                     break;
                 case 'o':
                     if (!_isController)
                     {
                         int.TryParse(argument.Substring(1), out _formDistance);
                     }
-
                     break;
                 case 'f':
                     int.TryParse(argument.Substring(1), out _formation);
                     if (_formation + 1 > _formationPresets.Length) _formation = _formationPresets.Length - 1;
                     break;
-                //default:
-                //    long targetID;
-                //    if (mode != 0 && !autoTarget && long.TryParse(argument, out targetID))
-                //        wAPI.SetAiFocus(Me, targetID);
-                //    break;
-            }
-        }
-
-        Vector3D _accel;
-        Vector3D _accelR;
-        Vector3D _timeToStop;
-
-        public Vector3D CalcStopPosition(Vector3D velocity, Vector3D gridCenter)
-        {
-            // Validate inputs
-            if (!IsValidVector(velocity) || !IsValidVector(gridCenter))
-            {
-                return gridCenter; // Return current position if inputs are invalid
-            }
-
-            // Calculate acceleration for each (local) axis; 6 possible sides with thrust
-            _accel = new Vector3D(_thrustAmt[4], _thrustAmt[2], -_thrustAmt[0]) / _mass;
-            _accelR = new Vector3D(-_thrustAmt[5], -_thrustAmt[3], _thrustAmt[1]) / _mass;
-
-            // Validate acceleration calculations
-            if (!IsValidVector(_accel) || !IsValidVector(_accelR))
-            {
-                return gridCenter;
-            }
-
-            // Rotate (global -> local) velocity because Vector Math:tm:
-            Vector3D rVelocity = Vector3D.Rotate(velocity, Me.WorldMatrix);
-
-            if (!IsValidVector(rVelocity))
-            {
-                return gridCenter;
-            }
-
-            // Calculate time to stop for each (local) axis
-            _timeToStop = new Vector3D(
-                Math.Abs(_accel.X) > 0.001 && Math.Abs(_accelR.X) > 0.001
-                    ? (_accel.X + rVelocity.X < rVelocity.X - _accelR.X ? rVelocity.X / _accel.X : rVelocity.X / _accelR.X)
-                    : 0,
-                Math.Abs(_accel.Y) > 0.001 && Math.Abs(_accelR.Y) > 0.001
-                    ? (_accel.Y + rVelocity.Y < rVelocity.Y - _accelR.Y ? rVelocity.Y / _accel.Y : rVelocity.Y / _accelR.Y)
-                    : 0,
-                Math.Abs(_accel.Z) > 0.001 && Math.Abs(_accelR.Z) > 0.001
-                    ? (_accel.Z + rVelocity.Z < rVelocity.Z - _accelR.Z ? rVelocity.Z / _accel.Z : rVelocity.Z / _accelR.Z)
-                    : 0
-            );
-
-            if (!IsValidVector(_timeToStop))
-            {
-                return gridCenter;
-            }
-
-            // Distance from projected stop position to center
-            Vector3D result = gridCenter - (velocity * _timeToStop.Length()) / 2;
-
-            if (!IsValidVector(result))
-            {
-                return gridCenter;
-            }
-
-            return result;
-        }
-
-
-        // In and out, 20 minute adventure.
-        public void ThrustControl(Vector3D relPos, List<IMyThrust> up, List<IMyThrust> down, List<IMyThrust> left,
-            List<IMyThrust> right, List<IMyThrust> forward, List<IMyThrust> back)
-        {
-            /*
-             * 0 forward
-             * 1 back
-             * 2 up
-             * 3 down
-             * 4 right
-             * 5 left
-             */
-
-            // Converts relative position to clamped thrust direction
-            //Vector3D tMove = pid.Control(relPos);
-            Vector3D tMove = relPos;
-
-            //tMove = Vector3D.Clamp(tMove, new Vector3D(-1, -1, -1), new Vector3D(1, 1, 1));
-
-
-            //Vector3D.Normalize(ref tMove, out tMove);
-
-            // Rotate thrust direction to line up with grid orientation
-            MatrixD wm = Me.WorldMatrix;
-            tMove = new Vector3D(Vector3D.Dot(tMove, wm.Right), Vector3D.Dot(tMove, wm.Forward),
-                Vector3D.Dot(tMove, wm.Up));
-
-            // Output thrust to thrusters [ ))) ]
-            SetThrust(-tMove.X, right, true);
-            SetThrust(tMove.X, left, true);
-            SetThrust(-tMove.Y, forward, true);
-            SetThrust(tMove.Y, back, true);
-            SetThrust(-tMove.Z, up, true);
-            SetThrust(tMove.Z, down, true);
-
-
-            // TODO: If speed > 400, don't fire.
-            if (_hasABs && relPos.LengthSquared() > 10000)
-            {
-                if (tMove.X > 0.25)
-                    foreach (var ab in _leftAb)
-                        _targeting.FireWeapon(ab);
-                if (-tMove.X > 0.25)
-                    foreach (var ab in _rightAb)
-                        _targeting.FireWeapon(ab);
-                if (tMove.Y > 0.25)
-                    foreach (var ab in _forwardAb)
-                        _targeting.FireWeapon(ab);
-                if (-tMove.Y > 0.25)
-                    foreach (var ab in _backAb)
-                        _targeting.FireWeapon(ab);
-                if (tMove.Z > 0.25)
-                    foreach (var ab in _upAb)
-                        _targeting.FireWeapon(ab);
-                if (-tMove.Z > 0.25)
-                    foreach (var ab in _downAb)
-                        _targeting.FireWeapon(ab);
-            }
-        }
-        // AAAAAAARRRRRRRRRRRGGGGGGGGGGGGGGGHHHHHHHHHHHHHHHHHHHH
-        // 4 hours.
-        // Thanks invalid
-
-
-        public void SetThrust(double pct, List<IMyThrust> thrusters, bool disable)
-        {
-            float percent = (float)pct;
-            if (thrusters.Count == 0) return;
-            foreach (var thrust in thrusters)
-            {
-                //thrust.Enabled = percent > 0 || !disable;
-                thrust.ThrustOverridePercentage = percent;
+                case 'c':
+                    if (!_isController)
+                    {
+                        long.TryParse(argument.Substring(1), out _controlId);
+                    }
+                    break;
             }
         }
 
         public void RecalcThrust()
         {
+            // Clear existing thrust lists
+            _forwardThrust.Clear();
+            _backThrust.Clear();
+            _upThrust.Clear();
+            _downThrust.Clear();
+            _leftThrust.Clear();
+            _rightThrust.Clear();
+            
+            // Reset thrust amounts
+            for (int i = 0; i < 6; i++)
+                _thrustAmt[i] = 0;
+
             foreach (var thrust in _allThrust)
             {
-                /*
-                 * 0 forward
-                 * 1 back
-                 * 2 up
-                 * 3 down
-                 * 4 right
-                 * 5 left
-                 */
+                // Only process thrusters on our grid
+                if (thrust.CubeGrid.EntityId != _gridEntityId) continue;
 
                 if (thrust.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Forward))
                 {
                     _forwardThrust.Add(thrust);
                     _thrustAmt[0] += thrust.MaxEffectiveThrust;
-                    continue;
                 }
-
-                if (thrust.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Up))
+                else if (thrust.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Up))
                 {
                     _upThrust.Add(thrust);
                     _thrustAmt[2] += thrust.MaxEffectiveThrust;
-                    continue;
                 }
-
-                if (thrust.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Left))
+                else if (thrust.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Left))
                 {
                     _leftThrust.Add(thrust);
                     _thrustAmt[5] += thrust.MaxEffectiveThrust;
-                    continue;
                 }
-
-                if (thrust.Orientation.Forward == Me.Orientation.Forward)
+                else if (thrust.Orientation.Forward == Me.Orientation.Forward)
                 {
                     _backThrust.Add(thrust);
                     _thrustAmt[1] += thrust.MaxEffectiveThrust;
-                    continue;
                 }
-
-                if (thrust.Orientation.Forward == Me.Orientation.Up)
+                else if (thrust.Orientation.Forward == Me.Orientation.Up)
                 {
                     _downThrust.Add(thrust);
                     _thrustAmt[3] += thrust.MaxEffectiveThrust;
-                    continue;
                 }
-
-                if (thrust.Orientation.Forward == Me.Orientation.Left)
+                else if (thrust.Orientation.Forward == Me.Orientation.Left)
                 {
                     _rightThrust.Add(thrust);
                     _thrustAmt[4] += thrust.MaxEffectiveThrust;
@@ -2246,41 +2329,47 @@ namespace IngameScript
 
         public void RecalcABs()
         {
-            // Sort afterburners
+            // Clear existing AB lists
+            _forwardAb.Clear();
+            _backAb.Clear();
+            _upAb.Clear();
+            _downAb.Clear();
+            _leftAb.Clear();
+            _rightAb.Clear();
+
             foreach (var ab in _allABs)
             {
+                // Only process afterburners on our grid
+                if (ab.CubeGrid.EntityId != _gridEntityId) continue;
+
                 if (ab.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Forward))
                 {
                     _forwardAb.Add(ab);
                 }
-
-                if (ab.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Up))
+                else if (ab.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Up))
                 {
                     _upAb.Add(ab);
                 }
-
-                if (ab.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Left))
+                else if (ab.Orientation.Forward == Base6Directions.GetOppositeDirection(Me.Orientation.Left))
                 {
                     _leftAb.Add(ab);
                 }
-
-                if (ab.Orientation.Forward == Me.Orientation.Forward)
+                else if (ab.Orientation.Forward == Me.Orientation.Forward)
                 {
                     _backAb.Add(ab);
                 }
-
-                if (ab.Orientation.Forward == Me.Orientation.Up)
+                else if (ab.Orientation.Forward == Me.Orientation.Up)
                 {
                     _downAb.Add(ab);
                 }
-
-                if (ab.Orientation.Forward == Me.Orientation.Left)
+                else if (ab.Orientation.Forward == Me.Orientation.Left)
                 {
                     _rightAb.Add(ab);
                 }
             }
-        }
 
+            _hasABs = _allABs.Count > 0;
+        }
 
         public double RoundPlaces(double d, int place)
         {
@@ -2292,9 +2381,7 @@ namespace IngameScript
             return _thrustAmt[dir] / _mass;
         }
 
-        public void
-            SendGroupMsg<T>(Object message,
-                bool sendAll) // Shorthand so I don't have to type out like 50 chars every time I do an IGC call
+        public void SendGroupMsg<T>(Object message, bool sendAll)
         {
             if (_group == 0 || sendAll)
             {
