@@ -332,7 +332,7 @@ namespace IngameScript
         int swarmDroneCount = 0; // Number of drones that reported performance this frame
         double averageSwarmRuntimeMS = 0; // Rolling average of swarm performance
         List<double> currentFrameRuntimes = new List<double>(); // Store runtimes for current frame
-        
+
         Dictionary<long, double> dronePerformanceData = new Dictionary<long, double>();
         Dictionary<long, long> droneLastUpdate = new Dictionary<long, long>();
         const int PERFORMANCE_TIMEOUT_FRAMES = 300; // 5 seconds at 60fps
@@ -766,17 +766,27 @@ namespace IngameScript
             {
                 try
                 {
-                    if (averageRuntimeMS < runtimeThreshold)
+                    // ALWAYS do these critical operations regardless of performance
+                    centerOfGrid = Me.CubeGrid.GetPosition();
+
+                    // Smart throttling - spread work across frames when performance is poor
+                    bool isThrottled = averageRuntimeMS >= runtimeThreshold;
+                    int throttleFrames = isThrottled ? 6 : 1; // Spread work across 6 frames when throttled
+
+                    // Frame-distributed operations (only when throttled)
+                    if (!isThrottled || (frame % throttleFrames) == 0)
                     {
-                        // Only update targeting every 10 ticks
-                        if (targetUpdateTimer++ >= TARGET_UPDATE_INTERVAL)
+                        // Only update targeting every 10 ticks (or less frequently if throttled)
+                        int targetingInterval = isThrottled ? TARGET_UPDATE_INTERVAL * 3 : TARGET_UPDATE_INTERVAL;
+                        if (targetUpdateTimer++ >= targetingInterval)
                         {
                             targeting.Update();
                             targetUpdateTimer = 0;
                         }
+                    }
 
-                        centerOfGrid = Me.CubeGrid.GetPosition();
-
+                    if (!isThrottled || (frame % throttleFrames) == 1)
+                    {
                         Echo("1");
                         if (!healMode)
                         {
@@ -794,19 +804,25 @@ namespace IngameScript
                                 predictedTargetPos = new Vector3D();
                             }
                         }
+                    }
 
-
+                    if (!isThrottled || (frame % throttleFrames) == 2)
+                    {
                         outText += "Velocity " + speed + "\n";
                         Echo("2");
-                        if (frame % 60 == 0)
+
+                        // Update speed and auto-systems less frequently when throttled
+                        int systemUpdateInterval = isThrottled ? 120 : 60;
+                        if (frame % systemUpdateInterval == 0)
                         {
                             speed = Me.CubeGrid.LinearVelocity.Length();
-
                             AutoFortify();
-
                             AutoIntegrity();
                         }
+                    }
 
+                    if (!isThrottled || (frame % throttleFrames) == 3)
+                    {
                         Echo("3");
                         if (isController) // If on AND is controller, Update drones with new instructions/positions
                         {
@@ -814,29 +830,19 @@ namespace IngameScript
                             IGCSendHandler();
                             UpdateSwarmPerformanceAverage();
                         }
-
-                        else // If on AND is drone
-                        {
-                            Echo("4.-5");
-                            RunActiveDrone();
-                        }
                     }
-                    else
-                    {
-                        // Performance is poor - only do critical operations
-                        centerOfGrid = Me.CubeGrid.GetPosition();
-                        outText += "PERFORMANCE THROTTLED\n";
 
-                        // Still do basic drone operations for safety
-                        if (!isController && activated)
-                        {
-                            // Minimal drone execution
-                            Vector3D moveTo = controllerPos +
-                                              Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
-                            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-                            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust,
-                                forwardThrust, backThrust);
-                        }
+                    // ALWAYS do drone movement - this is critical for safety
+                    if (!isController)
+                    {
+                        Echo("4.-5");
+                        RunActiveDrone();
+                    }
+
+                    // Add throttling indicator to output
+                    if (isThrottled)
+                    {
+                        outText += $"THROTTLED ({throttleFrames}x slower)\n";
                     }
 
                     errorCounter = 0;
@@ -853,7 +859,6 @@ namespace IngameScript
                     }
 
                     Me.GetSurface(0).WriteText(e.ToString());
-
                     errorCounter++;
                 }
             }
@@ -1054,10 +1059,11 @@ namespace IngameScript
 
         private void ActiveDroneFrame2()
         {
-            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos; // Use predictedTargetPos instead
+            resultPos = aiTarget.IsEmpty() ? ctrlTargetPos : predictedTargetPos;
 
-            // Distribute operations across frames
-            int frameModulo = averageRuntimeMS > runtimeThreshold * 0.5 ? 12 : 6;
+            // Adjust frame distribution based on performance
+            bool isThrottled = averageRuntimeMS >= runtimeThreshold;
+            int frameModulo = isThrottled ? 24 : 6; // Much slower when throttled
 
             switch (frame % frameModulo)
             {
@@ -1065,15 +1071,16 @@ namespace IngameScript
                     if (doCcrp) CCRPHandler();
                     break;
                 case 1:
-                    if (averageRuntimeMS < runtimeThreshold)
+                    // Only do obstruction checking if performance allows
+                    if (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.5)
                         targeting.GetObstructions(friendlies);
                     break;
                 case 2:
                     AutoFlareHandler();
                     break;
                 case 3:
-                    // Update projectiles locked on
-                    if (targeting is WCTargetingHelper && averageRuntimeMS < runtimeThreshold)
+                    // Update projectiles locked on (less critical when throttled)
+                    if (targeting is WCTargetingHelper && (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.2))
                     {
                         var wcTargeting = (WCTargetingHelper)targeting;
                         projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(gridId);
@@ -1082,25 +1089,26 @@ namespace IngameScript
                     break;
             }
 
-            int performanceMultiplier = averageRuntimeMS > runtimeThreshold * 0.5 ? 2 : 1;
+            // Extend intervals when throttled
+            int performanceMultiplier = isThrottled ? 4 : (averageRuntimeMS > runtimeThreshold * 0.5 ? 2 : 1);
 
             if (frame % (60 * performanceMultiplier) == 0)
             {
-                // Gets closest target. AHHHHHHHHHHHHHHHHHHHHHHHHHH.
-                if (!healMode && (mode == 0 || autoTarget) && averageRuntimeMS < runtimeThreshold)
+                // Gets closest target - less frequent when throttled
+                if (!healMode && (mode == 0 || autoTarget) &&
+                    (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.3))
                     targeting.SetTarget(targeting.GetClosestTarget());
                 else if (healMode && autoTarget)
                     aiTarget = friendlies[0];
-
 
                 // turn off guns if target is missing
                 if (aiTarget.IsEmpty() && !healMode)
                     foreach (var weapon in fixedGuns)
                         Fire(weapon, false);
 
+                // Thruster health check - less frequent when throttled
                 bool needsRecalc = false;
-                // check if any thrusters are dead
-                if (averageRuntimeMS < runtimeThreshold)
+                if (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.5)
                 {
                     foreach (var t in allThrust)
                     {
@@ -1119,20 +1127,20 @@ namespace IngameScript
                     }
                 }
 
-                // Revengance status
-                if (!(mode == 0 && autoTarget)) // If drone and hasn't already gone ballistic
+                // Revengance status (always check this for safety)
+                if (!(mode == 0 && autoTarget))
                 {
-                    if (DateTime.Now.Ticks - lastControllerPing >
-                        100000000) // If hasn't recieved message within 10 seconds
+                    if (DateTime.Now.Ticks - lastControllerPing > 100000000)
                     {
-                        mode = 0; // Go into freeflight mode
-                        autoTarget = true; // Automatically attack the nearest enemy
-                        antenna.HudText = angryText[new Random().Next(angryText.Count())]; // Ree at the enemy
+                        mode = 0;
+                        autoTarget = true;
+                        antenna.HudText = angryText[new Random().Next(angryText.Count())];
                     }
                 }
             }
 
-            if (frame % (300 * performanceMultiplier) == 0)
+            // Cache clearing - much less frequent when throttled
+            if (frame % (300 * performanceMultiplier * 2) == 0)
             {
                 cachedPredictedPos = new Vector3D();
                 cachedAmmoLeadPositions.Clear();
@@ -1430,7 +1438,7 @@ namespace IngameScript
                 }
             }
         }
-        
+
         private bool IsValidVector(Vector3D vector)
         {
             return !double.IsNaN(vector.X) && !double.IsNaN(vector.Y) && !double.IsNaN(vector.Z) &&
@@ -1439,7 +1447,8 @@ namespace IngameScript
 
         private bool IsValidMatrix(MatrixD matrix)
         {
-            return IsValidVector(matrix.Forward) && IsValidVector(matrix.Up) && IsValidVector(matrix.Right) && IsValidVector(matrix.Translation);
+            return IsValidVector(matrix.Forward) && IsValidVector(matrix.Up) && IsValidVector(matrix.Right) &&
+                   IsValidVector(matrix.Translation);
         }
 
         private void PrintDebugText()
@@ -1450,7 +1459,8 @@ namespace IngameScript
             if (isController)
             {
                 outText += $"Swarm Avg: {averageSwarmRuntimeMS:F2}ms | Drones: {droneEntities.Count}\n";
-                outText += $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm: {(averageSwarmRuntimeMS / 16.67 * 100):F1}%\n";
+                outText +=
+                    $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm: {(averageSwarmRuntimeMS / 16.67 * 100):F1}%\n";
             }
 
             // CHANGE THIS PART - send the average runtime instead of current runtime
@@ -1540,10 +1550,10 @@ namespace IngameScript
 
             // Simple average of all reported drone average runtimes
             double currentSwarmAverage = currentFrameRuntimes.Sum();
-    
+
             // Update rolling average
             averageSwarmRuntimeMS = currentSwarmAverage;
-            
+
             // Clear for next batch
             currentFrameRuntimes.Clear();
         }
@@ -2078,7 +2088,7 @@ namespace IngameScript
 
             // Rotate (global -> local) velocity because Vector Math:tm:
             Vector3D rVelocity = Vector3D.Rotate(velocity, Me.WorldMatrix);
-    
+
             if (!IsValidVector(rVelocity))
             {
                 return gridCenter;
@@ -2086,12 +2096,15 @@ namespace IngameScript
 
             // Calculate time to stop for each (local) axis
             timeToStop = new Vector3D(
-                Math.Abs(accel.X) > 0.001 && Math.Abs(accelR.X) > 0.001 ? 
-                    (accel.X + rVelocity.X < rVelocity.X - accelR.X ? rVelocity.X / accel.X : rVelocity.X / accelR.X) : 0,
-                Math.Abs(accel.Y) > 0.001 && Math.Abs(accelR.Y) > 0.001 ? 
-                    (accel.Y + rVelocity.Y < rVelocity.Y - accelR.Y ? rVelocity.Y / accel.Y : rVelocity.Y / accelR.Y) : 0,
-                Math.Abs(accel.Z) > 0.001 && Math.Abs(accelR.Z) > 0.001 ? 
-                    (accel.Z + rVelocity.Z < rVelocity.Z - accelR.Z ? rVelocity.Z / accel.Z : rVelocity.Z / accelR.Z) : 0
+                Math.Abs(accel.X) > 0.001 && Math.Abs(accelR.X) > 0.001
+                    ? (accel.X + rVelocity.X < rVelocity.X - accelR.X ? rVelocity.X / accel.X : rVelocity.X / accelR.X)
+                    : 0,
+                Math.Abs(accel.Y) > 0.001 && Math.Abs(accelR.Y) > 0.001
+                    ? (accel.Y + rVelocity.Y < rVelocity.Y - accelR.Y ? rVelocity.Y / accel.Y : rVelocity.Y / accelR.Y)
+                    : 0,
+                Math.Abs(accel.Z) > 0.001 && Math.Abs(accelR.Z) > 0.001
+                    ? (accel.Z + rVelocity.Z < rVelocity.Z - accelR.Z ? rVelocity.Z / accel.Z : rVelocity.Z / accelR.Z)
+                    : 0
             );
 
             if (!IsValidVector(timeToStop))
@@ -2101,12 +2114,12 @@ namespace IngameScript
 
             // Distance from projected stop position to center
             Vector3D result = gridCenter - (velocity * timeToStop.Length()) / 2;
-    
+
             if (!IsValidVector(result))
             {
                 return gridCenter;
             }
-    
+
             return result;
         }
 
