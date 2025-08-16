@@ -64,8 +64,8 @@ namespace IngameScript
 
         /* PERFORMANCE SETTINGS */
 
-        // Runtime threshold in milliseconds - operations throttle above this
-        double runtimeThreshold = 0.8;
+        // Runtime threshold in milliseconds - operations throttle above this (PER DRONE)
+        double runtimeThreshold = 0.05;
 
         // Exponential moving average significance for runtime tracking
         const double RUNTIME_SIGNIFICANCE = 0.005;
