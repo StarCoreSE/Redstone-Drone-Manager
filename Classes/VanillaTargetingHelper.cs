@@ -21,7 +21,7 @@ namespace IngameScript
 
         public override void Update()
         {
-            program.outText += "VANILLA!!!";
+            program.OutText += "VANILLA!!!";
 
             updateCount++;
             if (updateCount == 100)
