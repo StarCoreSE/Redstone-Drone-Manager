@@ -332,6 +332,12 @@ namespace IngameScript
         int swarmDroneCount = 0; // Number of drones that reported performance this frame
         double averageSwarmRuntimeMS = 0; // Rolling average of swarm performance
         List<double> currentFrameRuntimes = new List<double>(); // Store runtimes for current frame
+        
+        Dictionary<long, double> dronePerformanceData = new Dictionary<long, double>();
+        Dictionary<long, long> droneLastUpdate = new Dictionary<long, long>();
+        const int PERFORMANCE_TIMEOUT_FRAMES = 300; // 5 seconds at 60fps
+        double lastSwarmCalculation = 0;
+        int performanceCalculationFrame = 0;
 
         #endregion
 
@@ -806,6 +812,7 @@ namespace IngameScript
                         {
                             Echo("3.5");
                             IGCSendHandler();
+                            UpdateSwarmPerformanceAverage();
                         }
 
                         else // If on AND is drone
@@ -1442,23 +1449,20 @@ namespace IngameScript
 
             if (isController)
             {
-                // Update swarm performance before displaying
-                UpdateSwarmPerformanceAverage();
-
                 outText += $"Swarm Avg: {averageSwarmRuntimeMS:F2}ms | Drones: {droneEntities.Count}\n";
-                outText +=
-                    $"Controller: {(int)(Runtime.LastRunTimeMs / 16.67 * 100)}% | Swarm: {(int)(averageSwarmRuntimeMS / 16.67 * 100)}%\n";
+                outText += $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm: {(averageSwarmRuntimeMS / 16.67 * 100):F1}%\n";
             }
 
-            if (frame % 4 == 0)
+            // CHANGE THIS PART - send the average runtime instead of current runtime
+            if (frame % 60 == 0) // Send every second instead of every 4 frames
             {
                 if (!isController)
-                    IGC.SendBroadcastMessage("per", Runtime.LastRunTimeMs);
-                // Controller doesn't need to send its own performance to itself anymore
+                    IGC.SendBroadcastMessage("per", averageRuntimeMS); // Send average instead of current
             }
 
             Echo(outText);
         }
+
 
         public bool IGCHandler(UpdateType updateSource)
         {
@@ -1512,14 +1516,12 @@ namespace IngameScript
 
                 while (performanceListener.HasPendingMessage)
                 {
-                    double droneRuntime = performanceListener.AcceptMessage().As<double>();
+                    double droneAvgRuntime = performanceListener.AcceptMessage().As<double>();
 
                     if (isController)
                     {
-                        // Store the runtime for this frame
-                        currentFrameRuntimes.Add(droneRuntime);
-                        totalSwarmRuntime += droneRuntime;
-                        swarmDroneCount++;
+                        // Simple: just store the runtimes and calculate average
+                        currentFrameRuntimes.Add(droneAvgRuntime);
                     }
 
                     wasMessageRecieved = true;
@@ -1534,20 +1536,16 @@ namespace IngameScript
 
         private void UpdateSwarmPerformanceAverage()
         {
-            if (currentFrameRuntimes.Count > 0)
-            {
-                // Calculate current frame average
-                double currentFrameAverage = totalSwarmRuntime / swarmDroneCount;
+            if (!isController || currentFrameRuntimes.Count == 0) return;
 
-                // Update rolling average using the same EMA as individual drone tracking
-                averageSwarmRuntimeMS = RUNTIME_SIGNIFICANCE * currentFrameAverage +
-                                        (1 - RUNTIME_SIGNIFICANCE) * averageSwarmRuntimeMS;
-
-                // Clear for next frame
-                currentFrameRuntimes.Clear();
-                totalSwarmRuntime = 0;
-                swarmDroneCount = 0;
-            }
+            // Simple average of all reported drone average runtimes
+            double currentSwarmAverage = currentFrameRuntimes.Average();
+    
+            // Update rolling average
+            averageSwarmRuntimeMS = currentSwarmAverage;
+            
+            // Clear for next batch
+            currentFrameRuntimes.Clear();
         }
 
         public void AutoIntegrity()
