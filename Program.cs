@@ -853,12 +853,14 @@ namespace IngameScript
                             UpdateSwarmPerformanceAverage();
                         }
                     }
-
-                    // ALWAYS do drone movement - this is critical for safety
-                    if (!isController)
+                    
+                    if (!isController) //throttling this will make it impossible to aim fug
                     {
-                        Echo("4.-5");
-                        RunActiveDrone();
+                        //if (!isThrottled || (frame % throttleFrames) == 4)
+                        //{
+                            Echo("4.-5");
+                            RunActiveDrone();
+                        //}
                     }
 
                     // Add throttling indicator to output
