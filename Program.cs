@@ -328,6 +328,11 @@ namespace IngameScript
         double speed = 0;
         int id = -1; // Per-drone ID. Used for formation flight. Controller is always -1
 
+        double totalSwarmRuntime = 0; // Sum of all drone runtimes this frame
+        int swarmDroneCount = 0; // Number of drones that reported performance this frame
+        double averageSwarmRuntimeMS = 0; // Rolling average of swarm performance
+        List<double> currentFrameRuntimes = new List<double>(); // Store runtimes for current frame
+
         #endregion
 
         #region Blocks
@@ -697,7 +702,8 @@ namespace IngameScript
                 return;
 
             // Update performance average using EMA
-            averageRuntimeMS = RUNTIME_SIGNIFICANCE * Runtime.LastRunTimeMs + (1 - RUNTIME_SIGNIFICANCE) * averageRuntimeMS;
+            averageRuntimeMS = RUNTIME_SIGNIFICANCE * Runtime.LastRunTimeMs +
+                               (1 - RUNTIME_SIGNIFICANCE) * averageRuntimeMS;
 
             if (!string.IsNullOrEmpty(argument) &&
                 (argument == "recover" || argument == "recycle" || argument == "reset"))
@@ -737,8 +743,10 @@ namespace IngameScript
             // Status info
             outText +=
                 $"M{mode} : G{group} : ID{id} {(activated ? "ACTIVE" : "INACTIVE")} {IndicateRun()}\n";
-            outText += $"Runtime: {Runtime.LastRunTimeMs:F2}ms | Avg: {averageRuntimeMS:F2}ms | Limit: {runtimeThreshold}ms\n";
-            outText += $"\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
+            outText +=
+                $"Runtime: {Runtime.LastRunTimeMs:F2}ms | Avg: {averageRuntimeMS:F2}ms | Limit: {runtimeThreshold}ms\n";
+            outText +=
+                $"\nRocketman Drone Manager\n-------------------------\n{(isController ? $"Controlling {droneEntities.Count} drone(s)" : "Drone Mode")}\n";
 
             // If ID unset and is not controller, ping controller for ID.
             if (id == -1 && !isController)
@@ -811,14 +819,16 @@ namespace IngameScript
                         // Performance is poor - only do critical operations
                         centerOfGrid = Me.CubeGrid.GetPosition();
                         outText += "PERFORMANCE THROTTLED\n";
-                        
+
                         // Still do basic drone operations for safety
                         if (!isController && activated)
                         {
                             // Minimal drone execution
-                            Vector3D moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                            Vector3D moveTo = controllerPos +
+                                              Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
                             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
-                            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust, backThrust);
+                            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust,
+                                forwardThrust, backThrust);
                         }
                     }
 
@@ -849,14 +859,16 @@ namespace IngameScript
             }
 
             // Check for WeaponCore issues in active drones
-            if (activated && !doCcrp && fixedGuns.Count > 0 && frame % (averageRuntimeMS > runtimeThreshold ? 120 : 60) == 0)
+            if (activated && !doCcrp && fixedGuns.Count > 0 &&
+                frame % (averageRuntimeMS > runtimeThreshold ? 120 : 60) == 0)
             {
                 Echo("WeaponCore not active but weapons present - attempting recovery");
                 ReinitializeWeaponCore();
             }
 
             // Auto-detect if we might be a copy with conflicting ID
-            if (activated && id != -1 && !isController && frame % (averageRuntimeMS > runtimeThreshold ? 600 : 300) == 0)
+            if (activated && id != -1 && !isController &&
+                frame % (averageRuntimeMS > runtimeThreshold ? 600 : 300) == 0)
             {
                 // Check if our stored grid ID doesn't match our actual grid ID
                 if (gridId != Me.CubeGrid.EntityId)
@@ -1039,7 +1051,7 @@ namespace IngameScript
 
             // Distribute operations across frames
             int frameModulo = averageRuntimeMS > runtimeThreshold * 0.5 ? 12 : 6;
-            
+
             switch (frame % frameModulo)
             {
                 case 0:
@@ -1125,11 +1137,11 @@ namespace IngameScript
 
         void RunActiveDrone()
         {
-            outText += "Locked onto [" + aiTarget.Name + "]\n";
+            outText += "Locked onto " + aiTarget.Name + "\n";
             if (frame % 2 == 0) ActiveDroneFrame2();
 
             Vector3D aimPoint = new Vector3D();
-            Vector3D aimDirection;
+            Vector3D aimDirection = Me.WorldMatrix.Forward; // Default to forward direction
             bool hasValidAimPoint = false;
 
             if (!aiTarget.IsEmpty())
@@ -1137,7 +1149,7 @@ namespace IngameScript
                 if (targeting is WCTargetingHelper && fixedGuns.Count > 0)
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
-                    
+
                     int weaponUpdateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 120 : 60;
                     if (frame % weaponUpdateInterval == 0 && fixedGuns.First() != null)
                     {
@@ -1149,7 +1161,7 @@ namespace IngameScript
                     {
                         Vector3D? predictedPos = wcTargeting.wAPI.GetPredictedTargetPosition(fixedGuns.First(),
                             aiTarget.EntityId, weaponMap.First().Value);
-                        if (predictedPos.HasValue)
+                        if (predictedPos.HasValue && IsValidVector(predictedPos.Value))
                         {
                             cachedPredictedPos = predictedPos.Value;
                             hasValidAimPoint = true;
@@ -1170,57 +1182,118 @@ namespace IngameScript
                 }
 
                 // If we have a target but no valid weapon prediction, use the target position
-                if (!hasValidAimPoint)
+                if (!hasValidAimPoint && IsValidVector(aiTarget.Position))
                 {
                     aimPoint = aiTarget.Position;
+                    hasValidAimPoint = true;
                 }
 
-                aimDirection = Vector3D.Normalize(aimPoint - centerOfGrid);
+                // Calculate aim direction safely
+                if (hasValidAimPoint)
+                {
+                    Vector3D aimVector = aimPoint - centerOfGrid;
+                    if (IsValidVector(aimVector) && aimVector.LengthSquared() > 0.01) // Avoid near-zero vectors
+                    {
+                        aimDirection = Vector3D.Normalize(aimVector);
+                        // Double-check the normalized vector is valid
+                        if (!IsValidVector(aimDirection))
+                        {
+                            aimDirection = Me.WorldMatrix.Forward; // Fallback
+                        }
+                    }
+                    else
+                    {
+                        aimDirection = Me.WorldMatrix.Forward; // Fallback for invalid/zero vectors
+                    }
+                }
             }
             else
             {
-                // No target - use controller's forward direction
-                aimDirection = ctrlMatrix.Forward;
+                // No target - use controller's forward direction if available
+                if (IsValidMatrix(ctrlMatrix))
+                {
+                    aimDirection = ctrlMatrix.Forward;
+                }
+                else
+                {
+                    aimDirection = Me.WorldMatrix.Forward;
+                }
             }
 
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
 
-            if (!aiTarget.IsEmpty() && averageRuntimeMS < runtimeThreshold)
+            // Validate stopPosition
+            if (!IsValidVector(stopPosition))
+            {
+                stopPosition = centerOfGrid;
+            }
+
+            if (!aiTarget.IsEmpty() && averageRuntimeMS < runtimeThreshold && IsValidVector(aimPoint))
             {
                 d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f);
             }
 
-            if (averageRuntimeMS < runtimeThreshold)
+            if (averageRuntimeMS < runtimeThreshold && IsValidVector(stopPosition))
                 d.DrawGPS("Stop Position", stopPosition);
 
             switch (mode)
             {
                 case 0:
-                    gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                    if (!aiTarget.IsEmpty())
+                    // Validate aimDirection before using it
+                    if (IsValidVector(aimDirection))
                     {
-                        moveTo = aiTarget.Position +
-                                 Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+                        gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
+                    }
+
+                    if (!aiTarget.IsEmpty() && IsValidVector(aiTarget.Position))
+                    {
+                        Vector3D formationOffset =
+                            Vector3D.Rotate(formationPresets[1][id] / formDistance * mainDistance, ctrlMatrix);
+                        if (IsValidVector(formationOffset))
+                        {
+                            moveTo = aiTarget.Position + formationOffset;
+                        }
+                        else
+                        {
+                            moveTo = aiTarget.Position;
+                        }
                     }
                     else
                     {
                         // No target - maintain formation relative to controller
-                        moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                        Vector3D formationOffset = Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                        if (IsValidVector(formationOffset) && IsValidVector(controllerPos))
+                        {
+                            moveTo = controllerPos + formationOffset;
+                        }
+                        else
+                        {
+                            moveTo = centerOfGrid; // Stay put if calculations fail
+                        }
                     }
 
-                    if (averageRuntimeMS < runtimeThreshold)
+                    if (averageRuntimeMS < runtimeThreshold && IsValidVector(moveTo))
                         d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
                     if (averageRuntimeMS < runtimeThreshold * 0.7)
                     {
                         closestCollision = CheckCollision(moveTo);
-                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                        if (closestCollision != new Vector3D() && IsValidVector(closestCollision))
+                        {
+                            Vector3D avoidanceVector = moveTo.Cross(closestCollision);
+                            if (IsValidVector(avoidanceVector))
+                            {
+                                moveTo += avoidanceVector;
+                            }
+                        }
                     }
+
                     break;
 
                 case 1:
                     double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
-                    if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper && frame % (averageRuntimeMS > runtimeThreshold * 0.5 ? 60 : 30) == 0)
+                    if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper &&
+                        frame % (averageRuntimeMS > runtimeThreshold * 0.5 ? 60 : 30) == 0)
                     {
                         WCTargetingHelper wCTargeting = (WCTargetingHelper)targeting;
                         foreach (var wep in fixedGuns)
@@ -1232,13 +1305,37 @@ namespace IngameScript
 
                     Vector3D formationAimDirection;
                     if (dSq > formDistance * formDistance * 4 || healMode)
-                        formationAimDirection = Vector3D.Normalize(controllerPos - centerOfGrid);
-                    else if (!aiTarget.IsEmpty())
+                    {
+                        Vector3D toController = controllerPos - centerOfGrid;
+                        if (IsValidVector(toController) && toController.LengthSquared() > 0.01)
+                        {
+                            formationAimDirection = Vector3D.Normalize(toController);
+                        }
+                        else
+                        {
+                            formationAimDirection = Me.WorldMatrix.Forward;
+                        }
+                    }
+                    else if (!aiTarget.IsEmpty() && IsValidVector(aimDirection))
+                    {
                         formationAimDirection = aimDirection;
-                    else
+                    }
+                    else if (IsValidMatrix(ctrlMatrix))
+                    {
                         formationAimDirection = ctrlMatrix.Forward; // No target - face same way as controller
+                    }
+                    else
+                    {
+                        formationAimDirection = Me.WorldMatrix.Forward;
+                    }
 
-                    if (!aiTarget.IsEmpty() && !healMode)
+                    // Validate formationAimDirection before using
+                    if (!IsValidVector(formationAimDirection))
+                    {
+                        formationAimDirection = Me.WorldMatrix.Forward;
+                    }
+
+                    if (!aiTarget.IsEmpty() && !healMode && IsValidVector(aimDirection))
                     {
                         gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     }
@@ -1247,52 +1344,117 @@ namespace IngameScript
                         gyros.FaceVectors(formationAimDirection, Me.WorldMatrix.Up);
                     }
 
-                    moveTo = controllerPos + Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                    Vector3D formationPos = Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
+                    if (IsValidVector(formationPos) && IsValidVector(controllerPos))
+                    {
+                        moveTo = controllerPos + formationPos;
+                    }
+                    else
+                    {
+                        moveTo = centerOfGrid; // Stay put if calculations fail
+                    }
+
                     if (averageRuntimeMS < runtimeThreshold)
                     {
-                        d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
-                        d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                        d.DrawGPS("Drone Position", moveTo);
+                        if (IsValidVector(controllerPos))
+                            d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
+                        if (IsValidVector(moveTo))
+                        {
+                            d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
+                            d.DrawGPS("Drone Position", moveTo);
+                        }
                     }
+
                     if (averageRuntimeMS < runtimeThreshold * 0.7)
                     {
                         closestCollision = CheckCollision(moveTo);
-                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                        if (closestCollision != new Vector3D() && IsValidVector(closestCollision))
+                        {
+                            Vector3D avoidanceVector = moveTo.Cross(closestCollision);
+                            if (IsValidVector(avoidanceVector))
+                            {
+                                moveTo += avoidanceVector;
+                            }
+                        }
                     }
+
                     break;
 
                 case 2:
-                    gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                    moveTo = controllerPos + formationPresets[formation][id];
+                    if (IsValidVector(aimDirection))
+                    {
+                        gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
+                    }
+
+                    Vector3D fortifyPos = formationPresets[formation][id];
+                    if (IsValidVector(fortifyPos) && IsValidVector(controllerPos))
+                    {
+                        moveTo = controllerPos + fortifyPos;
+                    }
+                    else
+                    {
+                        moveTo = centerOfGrid;
+                    }
+
                     if (averageRuntimeMS < runtimeThreshold * 0.7)
                     {
                         closestCollision = CheckCollision(moveTo);
-                        if (closestCollision != new Vector3D()) moveTo += moveTo.Cross(closestCollision);
+                        if (closestCollision != new Vector3D() && IsValidVector(closestCollision))
+                        {
+                            Vector3D avoidanceVector = moveTo.Cross(closestCollision);
+                            if (IsValidVector(avoidanceVector))
+                            {
+                                moveTo += avoidanceVector;
+                            }
+                        }
                     }
+
                     break;
             }
 
-            ThrustControl(stopPosition - moveTo, upThrust, downThrust, leftThrust, rightThrust, forwardThrust,
-                backThrust);
+            // Final validation before thrust control
+            if (IsValidVector(stopPosition) && IsValidVector(moveTo))
+            {
+                Vector3D thrustVector = stopPosition - moveTo;
+                if (IsValidVector(thrustVector))
+                {
+                    ThrustControl(thrustVector, upThrust, downThrust, leftThrust, rightThrust, forwardThrust,
+                        backThrust);
+                }
+            }
+        }
+        
+        private bool IsValidVector(Vector3D vector)
+        {
+            return !double.IsNaN(vector.X) && !double.IsNaN(vector.Y) && !double.IsNaN(vector.Z) &&
+                   !double.IsInfinity(vector.X) && !double.IsInfinity(vector.Y) && !double.IsInfinity(vector.Z);
+        }
+
+        private bool IsValidMatrix(MatrixD matrix)
+        {
+            return IsValidVector(matrix.Forward) && IsValidVector(matrix.Up) && IsValidVector(matrix.Right) && IsValidVector(matrix.Translation);
         }
 
         private void PrintDebugText()
         {
             outText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
             outText += $"Avg Runtime: {averageRuntimeMS:F2}ms\n";
-            if (isController) outText += $"Total: {(int)(totalRuntime / 16 * 100000) / 100000d}% ({totalRuntime}ms)";
+
+            if (isController)
+            {
+                // Update swarm performance before displaying
+                UpdateSwarmPerformanceAverage();
+
+                outText += $"Swarm Avg: {averageSwarmRuntimeMS:F2}ms | Drones: {droneEntities.Count}\n";
+                outText +=
+                    $"Controller: {(int)(Runtime.LastRunTimeMs / 16.67 * 100)}% | Swarm: {(int)(averageSwarmRuntimeMS / 16.67 * 100)}%\n";
+            }
+
             if (frame % 4 == 0)
             {
                 if (!isController)
                     IGC.SendBroadcastMessage("per", Runtime.LastRunTimeMs);
-                else
-                {
-                    if (totalRuntime != Runtime.LastRunTimeMs)
-                    {
-                        totalRuntime = 0;
-                        totalRuntime += Runtime.LastRunTimeMs;
-                    }
-                }
+                // Controller doesn't need to send its own performance to itself anymore
             }
 
             Echo(outText);
@@ -1350,7 +1512,16 @@ namespace IngameScript
 
                 while (performanceListener.HasPendingMessage)
                 {
-                    totalRuntime += performanceListener.AcceptMessage().As<double>();
+                    double droneRuntime = performanceListener.AcceptMessage().As<double>();
+
+                    if (isController)
+                    {
+                        // Store the runtime for this frame
+                        currentFrameRuntimes.Add(droneRuntime);
+                        totalSwarmRuntime += droneRuntime;
+                        swarmDroneCount++;
+                    }
+
                     wasMessageRecieved = true;
                 }
             }
@@ -1359,6 +1530,24 @@ namespace IngameScript
             }
 
             return wasMessageRecieved;
+        }
+
+        private void UpdateSwarmPerformanceAverage()
+        {
+            if (currentFrameRuntimes.Count > 0)
+            {
+                // Calculate current frame average
+                double currentFrameAverage = totalSwarmRuntime / swarmDroneCount;
+
+                // Update rolling average using the same EMA as individual drone tracking
+                averageSwarmRuntimeMS = RUNTIME_SIGNIFICANCE * currentFrameAverage +
+                                        (1 - RUNTIME_SIGNIFICANCE) * averageSwarmRuntimeMS;
+
+                // Clear for next frame
+                currentFrameRuntimes.Clear();
+                totalSwarmRuntime = 0;
+                swarmDroneCount = 0;
+            }
         }
 
         public void AutoIntegrity()
@@ -1873,22 +2062,54 @@ namespace IngameScript
 
         public Vector3D CalcStopPosition(Vector3D velocity, Vector3D gridCenter)
         {
+            // Validate inputs
+            if (!IsValidVector(velocity) || !IsValidVector(gridCenter))
+            {
+                return gridCenter; // Return current position if inputs are invalid
+            }
+
             // Calculate acceleration for each (local) axis; 6 possible sides with thrust
             accel = new Vector3D(thrustAmt[4], thrustAmt[2], -thrustAmt[0]) / mass;
             accelR = new Vector3D(-thrustAmt[5], -thrustAmt[3], thrustAmt[1]) / mass;
 
+            // Validate acceleration calculations
+            if (!IsValidVector(accel) || !IsValidVector(accelR))
+            {
+                return gridCenter;
+            }
+
             // Rotate (global -> local) velocity because Vector Math:tm:
             Vector3D rVelocity = Vector3D.Rotate(velocity, Me.WorldMatrix);
+    
+            if (!IsValidVector(rVelocity))
+            {
+                return gridCenter;
+            }
 
             // Calculate time to stop for each (local) axis
             timeToStop = new Vector3D(
-                accel.X + rVelocity.X < rVelocity.X - accelR.X ? rVelocity.X / accel.X : rVelocity.X / accelR.X,
-                accel.Y + rVelocity.Y < rVelocity.Y - accelR.Y ? rVelocity.Y / accel.Y : rVelocity.Y / accelR.Y,
-                accel.Z + rVelocity.Z < rVelocity.Z - accelR.Z ? rVelocity.Z / accel.Z : rVelocity.Z / accelR.Z
+                Math.Abs(accel.X) > 0.001 && Math.Abs(accelR.X) > 0.001 ? 
+                    (accel.X + rVelocity.X < rVelocity.X - accelR.X ? rVelocity.X / accel.X : rVelocity.X / accelR.X) : 0,
+                Math.Abs(accel.Y) > 0.001 && Math.Abs(accelR.Y) > 0.001 ? 
+                    (accel.Y + rVelocity.Y < rVelocity.Y - accelR.Y ? rVelocity.Y / accel.Y : rVelocity.Y / accelR.Y) : 0,
+                Math.Abs(accel.Z) > 0.001 && Math.Abs(accelR.Z) > 0.001 ? 
+                    (accel.Z + rVelocity.Z < rVelocity.Z - accelR.Z ? rVelocity.Z / accel.Z : rVelocity.Z / accelR.Z) : 0
             );
 
+            if (!IsValidVector(timeToStop))
+            {
+                return gridCenter;
+            }
+
             // Distance from projected stop position to center
-            return gridCenter - (velocity * timeToStop.Length()) / 2;
+            Vector3D result = gridCenter - (velocity * timeToStop.Length()) / 2;
+    
+            if (!IsValidVector(result))
+            {
+                return gridCenter;
+            }
+    
+            return result;
         }
 
 
