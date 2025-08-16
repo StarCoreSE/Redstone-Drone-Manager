@@ -479,13 +479,20 @@ namespace IngameScript
             gyros = new GyroControl(this, Me, kP, kI, kD, lowerBound, upperBound, timeStep);
             Echo("Initialized Whip's Gyro Control");
 
+            long droneGridId = Me.CubeGrid.EntityId;
+
             // Get cockpit for controller
             GridTerminalSystem.GetBlocksOfType<IMyCockpit>(null, b =>
             {
-                cockpit = b;
-                return true;
+                if (b.CubeGrid.EntityId == droneGridId)
+                {
+                    cockpit = b;
+                    return true;
+                }
+
+                return false;
             });
-            Echo("Searched for cockpit " + (cockpit == null ? "null" : cockpit.CustomName));
+            Echo("Searched for cockpit on own grid " + (cockpit == null ? "null" : cockpit.CustomName));
 
             // Gets shield controllers. Also disables autofortify if no shield controllers are found.
             List<IMyTerminalBlock> shieldControllers = new List<IMyTerminalBlock>();
@@ -493,12 +500,13 @@ namespace IngameScript
             bool hasEnhancer = false;
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(shieldControllers, b =>
             {
+                if (b.CubeGrid.EntityId != droneGridId) return false;
                 if (!hasEnhancer) hasEnhancer = b.DefinitionDisplayNameText.Contains("Enhancer");
                 return b.CustomName.Contains("Shield Controller");
             });
             Echo($"Located {shieldControllers.Count} shield controllers");
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(shieldModulators,
-                b => { return b.CustomName.Contains("Shield Modulator"); });
+                b => { return b.CubeGrid.EntityId == droneGridId && b.CustomName.Contains("Shield Modulator"); });
             Echo($"Located {shieldModulators.Count} shield modulators");
             if (autoFortify) autoFortify = hasEnhancer;
 
@@ -538,23 +546,34 @@ namespace IngameScript
             // Autosets mass if ship controller detected
             GridTerminalSystem.GetBlocksOfType<IMyShipController>(null, b =>
             {
-                mass = b.CalculateShipMass().TotalMass;
-                return true;
+                if (b.CubeGrid.EntityId == droneGridId)
+                {
+                    mass = b.CalculateShipMass().TotalMass;
+                    return true;
+                }
+
+                return false;
             });
             Echo("Set grid mass to " + mass);
 
             // Set antenna ranges to 25k (save a tiny bit of power)
             GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(null, b =>
             {
-                b.Radius = 25000;
-                antenna = b;
-                return true;
+                if (b.CubeGrid.EntityId == droneGridId)
+                {
+                    b.Radius = 25000;
+                    antenna = b;
+                    return true;
+                }
+
+                return false;
             });
             Echo("Set antenna radii to 25km");
 
             // Get LCDs with name containing 'Rocketman' and sets them up
             if (isController || debug)
-                GridTerminalSystem.GetBlocksOfType(outLcds, b => b.CustomName.ToLower().Contains("rocketman"));
+                GridTerminalSystem.GetBlocksOfType(outLcds, b =>
+                    b.CubeGrid.EntityId == droneGridId && b.CustomName.ToLower().Contains("rocketman"));
 
             foreach (var l in outLcds)
             {
@@ -621,8 +640,8 @@ namespace IngameScript
             Echo($"Sorted {allABs.Count} afterburners");
 
             // Get all thrust
-            GridTerminalSystem.GetBlocksOfType(allThrust);
-            Echo($"Found {allThrust.Count} thrusters");
+            GridTerminalSystem.GetBlocksOfType(allThrust, t => t.CubeGrid == Me.CubeGrid);
+            Echo($"Found {allThrust.Count} thrusters on own grid");
 
             // Sort thrust and calculate total thrust per direction
             RecalcThrust();
@@ -696,6 +715,9 @@ namespace IngameScript
 
             // Clear any stale targeting data
             // aiTarget = new MyDetectedEntityInfo();
+
+            gridId = Me.CubeGrid.EntityId;
+            Echo($"Drone initialized on grid entity ID: {gridId}");
         }
 
 
@@ -1063,7 +1085,7 @@ namespace IngameScript
 
             // Adjust frame distribution based on performance
             bool isThrottled = averageRuntimeMS >= runtimeThreshold;
-            int frameModulo = isThrottled ? 24 : 6; // Much slower when throttled
+            int frameModulo = isThrottled ? 24 : 6;
 
             switch (frame % frameModulo)
             {
@@ -1071,16 +1093,13 @@ namespace IngameScript
                     if (doCcrp) CCRPHandler();
                     break;
                 case 1:
-                    // Only do obstruction checking if performance allows
-                    if (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.5)
-                        targeting.GetObstructions(friendlies);
+                    targeting.GetObstructions(friendlies);
                     break;
                 case 2:
                     AutoFlareHandler();
                     break;
                 case 3:
-                    // Update projectiles locked on (less critical when throttled)
-                    if (targeting is WCTargetingHelper && (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.2))
+                    if (targeting is WCTargetingHelper)
                     {
                         var wcTargeting = (WCTargetingHelper)targeting;
                         projectilesLockedOn = wcTargeting.wAPI.GetProjectilesLockedOn(gridId);
@@ -1089,14 +1108,12 @@ namespace IngameScript
                     break;
             }
 
-            // Extend intervals when throttled
-            int performanceMultiplier = isThrottled ? 4 : (averageRuntimeMS > runtimeThreshold * 0.5 ? 2 : 1);
+            // Extend intervals when throttled but don't double-check performance
+            int performanceMultiplier = isThrottled ? 4 : 1;
 
             if (frame % (60 * performanceMultiplier) == 0)
             {
-                // Gets closest target - less frequent when throttled
-                if (!healMode && (mode == 0 || autoTarget) &&
-                    (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.3))
+                if (!healMode && (mode == 0 || autoTarget))
                     targeting.SetTarget(targeting.GetClosestTarget());
                 else if (healMode && autoTarget)
                     aiTarget = friendlies[0];
@@ -1106,25 +1123,21 @@ namespace IngameScript
                     foreach (var weapon in fixedGuns)
                         Fire(weapon, false);
 
-                // Thruster health check - less frequent when throttled
                 bool needsRecalc = false;
-                if (!isThrottled || averageRuntimeMS < runtimeThreshold * 1.5)
+                foreach (var t in allThrust)
                 {
-                    foreach (var t in allThrust)
+                    if (t.WorldAABB == new BoundingBoxD())
                     {
-                        if (t.WorldAABB == new BoundingBoxD())
-                        {
-                            needsRecalc = true;
-                            break;
-                        }
+                        needsRecalc = true;
+                        break;
                     }
+                }
 
-                    if (needsRecalc)
-                    {
-                        GridTerminalSystem.GetBlocksOfType(allThrust);
-                        RecalcThrust();
-                        outText += $"Recalculated thrust with {allThrust.Count} thrusters";
-                    }
+                if (needsRecalc)
+                {
+                    GridTerminalSystem.GetBlocksOfType(allThrust, t => t.CubeGrid.EntityId == Me.CubeGrid.EntityId);
+                    RecalcThrust();
+                    outText += $"Recalculated thrust with {allThrust.Count} thrusters";
                 }
 
                 // Revengance status (always check this for safety)
@@ -1155,8 +1168,11 @@ namespace IngameScript
             outText += "Locked onto " + aiTarget.Name + "\n";
             if (frame % 2 == 0) ActiveDroneFrame2();
 
+            // Calculate throttle state once for the entire method
+            bool isThrottled = averageRuntimeMS >= runtimeThreshold;
+
             Vector3D aimPoint = new Vector3D();
-            Vector3D aimDirection = Me.WorldMatrix.Forward; // Default to forward direction
+            Vector3D aimDirection = Me.WorldMatrix.Forward;
             bool hasValidAimPoint = false;
 
             if (!aiTarget.IsEmpty())
@@ -1165,7 +1181,7 @@ namespace IngameScript
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
 
-                    int weaponUpdateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 120 : 60;
+                    int weaponUpdateInterval = isThrottled ? 120 : 60;
                     if (frame % weaponUpdateInterval == 0 && fixedGuns.First() != null)
                     {
                         weaponMap.Clear();
@@ -1183,7 +1199,7 @@ namespace IngameScript
                         }
                     }
 
-                    int ammoUpdateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 60 : 30;
+                    int ammoUpdateInterval = isThrottled ? 60 : 30;
                     if (frame % ammoUpdateInterval == 0)
                     {
                         cachedPrimaryAmmo = wcTargeting.wAPI.GetActiveAmmo(fixedGuns.First(), weaponMap.First().Value);
@@ -1196,35 +1212,32 @@ namespace IngameScript
                     }
                 }
 
-                // If we have a target but no valid weapon prediction, use the target position
+                // Rest of targeting logic...
                 if (!hasValidAimPoint && IsValidVector(aiTarget.Position))
                 {
                     aimPoint = aiTarget.Position;
                     hasValidAimPoint = true;
                 }
 
-                // Calculate aim direction safely
                 if (hasValidAimPoint)
                 {
                     Vector3D aimVector = aimPoint - centerOfGrid;
-                    if (IsValidVector(aimVector) && aimVector.LengthSquared() > 0.01) // Avoid near-zero vectors
+                    if (IsValidVector(aimVector) && aimVector.LengthSquared() > 0.01)
                     {
                         aimDirection = Vector3D.Normalize(aimVector);
-                        // Double-check the normalized vector is valid
                         if (!IsValidVector(aimDirection))
                         {
-                            aimDirection = Me.WorldMatrix.Forward; // Fallback
+                            aimDirection = Me.WorldMatrix.Forward;
                         }
                     }
                     else
                     {
-                        aimDirection = Me.WorldMatrix.Forward; // Fallback for invalid/zero vectors
+                        aimDirection = Me.WorldMatrix.Forward;
                     }
                 }
             }
             else
             {
-                // No target - use controller's forward direction if available
                 if (IsValidMatrix(ctrlMatrix))
                 {
                     aimDirection = ctrlMatrix.Forward;
@@ -1238,24 +1251,22 @@ namespace IngameScript
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, centerOfGrid);
 
-            // Validate stopPosition
             if (!IsValidVector(stopPosition))
             {
                 stopPosition = centerOfGrid;
             }
 
-            if (!aiTarget.IsEmpty() && averageRuntimeMS < runtimeThreshold && IsValidVector(aimPoint))
+            if (!aiTarget.IsEmpty() && !isThrottled && IsValidVector(aimPoint))
             {
                 d.DrawLine(centerOfGrid, aimPoint, Color.Red, 0.1f);
             }
 
-            if (averageRuntimeMS < runtimeThreshold && IsValidVector(stopPosition))
+            if (!isThrottled && IsValidVector(stopPosition))
                 d.DrawGPS("Stop Position", stopPosition);
 
             switch (mode)
             {
                 case 0:
-                    // Validate aimDirection before using it
                     if (IsValidVector(aimDirection))
                     {
                         gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
@@ -1276,7 +1287,6 @@ namespace IngameScript
                     }
                     else
                     {
-                        // No target - maintain formation relative to controller
                         Vector3D formationOffset = Vector3D.Rotate(formationPresets[formation][id], ctrlMatrix);
                         if (IsValidVector(formationOffset) && IsValidVector(controllerPos))
                         {
@@ -1284,13 +1294,14 @@ namespace IngameScript
                         }
                         else
                         {
-                            moveTo = centerOfGrid; // Stay put if calculations fail
+                            moveTo = centerOfGrid;
                         }
                     }
 
-                    if (averageRuntimeMS < runtimeThreshold && IsValidVector(moveTo))
+                    if (!isThrottled && IsValidVector(moveTo))
                         d.DrawLine(centerOfGrid, moveTo, Color.Blue, 0.1f);
-                    if (averageRuntimeMS < runtimeThreshold * 0.7)
+
+                    if (!isThrottled)
                     {
                         closestCollision = CheckCollision(moveTo);
                         if (closestCollision != new Vector3D() && IsValidVector(closestCollision))
@@ -1307,8 +1318,9 @@ namespace IngameScript
 
                 case 1:
                     double dSq = Vector3D.DistanceSquared(controllerPos, Me.CubeGrid.GetPosition());
+
                     if (!healMode && damageAmmo != "" && targeting is WCTargetingHelper &&
-                        frame % (averageRuntimeMS > runtimeThreshold * 0.5 ? 60 : 30) == 0)
+                        frame % (isThrottled ? 60 : 30) == 0)
                     {
                         WCTargetingHelper wCTargeting = (WCTargetingHelper)targeting;
                         foreach (var wep in fixedGuns)
@@ -1337,14 +1349,13 @@ namespace IngameScript
                     }
                     else if (IsValidMatrix(ctrlMatrix))
                     {
-                        formationAimDirection = ctrlMatrix.Forward; // No target - face same way as controller
+                        formationAimDirection = ctrlMatrix.Forward;
                     }
                     else
                     {
                         formationAimDirection = Me.WorldMatrix.Forward;
                     }
 
-                    // Validate formationAimDirection before using
                     if (!IsValidVector(formationAimDirection))
                     {
                         formationAimDirection = Me.WorldMatrix.Forward;
@@ -1366,10 +1377,10 @@ namespace IngameScript
                     }
                     else
                     {
-                        moveTo = centerOfGrid; // Stay put if calculations fail
+                        moveTo = centerOfGrid;
                     }
 
-                    if (averageRuntimeMS < runtimeThreshold)
+                    if (!isThrottled)
                     {
                         if (IsValidVector(controllerPos))
                             d.DrawLine(centerOfGrid, controllerPos, Color.Green, 0.1f);
@@ -1380,7 +1391,7 @@ namespace IngameScript
                         }
                     }
 
-                    if (averageRuntimeMS < runtimeThreshold * 0.7)
+                    if (!isThrottled)
                     {
                         closestCollision = CheckCollision(moveTo);
                         if (closestCollision != new Vector3D() && IsValidVector(closestCollision))
@@ -1411,7 +1422,7 @@ namespace IngameScript
                         moveTo = centerOfGrid;
                     }
 
-                    if (averageRuntimeMS < runtimeThreshold * 0.7)
+                    if (!isThrottled)
                     {
                         closestCollision = CheckCollision(moveTo);
                         if (closestCollision != new Vector3D() && IsValidVector(closestCollision))
@@ -1637,9 +1648,9 @@ namespace IngameScript
             {
                 MatrixD m = cockpit.IsFunctional ? cockpit.WorldMatrix : Me.WorldMatrix;
 
-                if (averageRuntimeMS < runtimeThreshold)
+                bool isThrottled = averageRuntimeMS >= runtimeThreshold;
+                if (!isThrottled)
                     d.DrawLine(centerOfGrid, centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
-
 
                 if (rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, orbitsPerSecond % 360 / frame / 57.2957795f);
@@ -1650,7 +1661,6 @@ namespace IngameScript
                     {
                         IGC.SendBroadcastMessage("pos" + group, centerOfGrid);
                         IGC.SendBroadcastMessage("vel" + group, -Me.CubeGrid.LinearVelocity);
-
                         IGC.SendBroadcastMessage("ori" + group, m);
                     }
                     else
@@ -1659,14 +1669,12 @@ namespace IngameScript
                         {
                             IGC.SendBroadcastMessage("pos" + i, centerOfGrid);
                             IGC.SendBroadcastMessage("vel" + i, -Me.CubeGrid.LinearVelocity);
-
                             IGC.SendBroadcastMessage("ori" + i, m);
                         }
                     }
                 }
                 else
                 {
-                    // Transmit position and orientation every other tick
                     IGC.SendBroadcastMessage("pos", centerOfGrid);
                     IGC.SendBroadcastMessage("vel", -Me.CubeGrid.LinearVelocity);
                     IGC.SendBroadcastMessage("ori", m);
@@ -1676,6 +1684,8 @@ namespace IngameScript
 
         public void CCRPHandler()
         {
+            bool isThrottled = averageRuntimeMS >= runtimeThreshold;
+
             if (healMode)
             {
                 outText += "Locked on controller\n";
@@ -1683,7 +1693,7 @@ namespace IngameScript
                                  maxOffset;
                 foreach (var weapon in fixedGuns)
                 {
-                    if (averageRuntimeMS < runtimeThreshold)
+                    if (!isThrottled)
                         d.DrawLine(centerOfGrid, Me.WorldMatrix.Forward * targeting.GetMaxRange(weapon) + centerOfGrid,
                             Color.White, 0.5f);
                     if (isLinedUp && targeting.GetWeaponReady(weapon))
@@ -1700,8 +1710,7 @@ namespace IngameScript
             {
                 WCTargetingHelper wcTargeting = (WCTargetingHelper)targeting;
 
-                // Update weapon maps AND lead positions together every 60 frames
-                int updateInterval = averageRuntimeMS > runtimeThreshold * 0.5 ? 120 : 60;
+                int updateInterval = isThrottled ? 120 : 60;
                 if (frame % updateInterval == weaponMapUpdateFrame)
                 {
                     cachedWeaponMaps.Clear();
