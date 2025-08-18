@@ -306,9 +306,9 @@ namespace IngameScript
         double _speed;
         int _id = -1; // Per-drone ID. Used for formation flight. Controller is always -1
 
-        double _totalSwarmRuntime = 0; // Sum of all drone runtimes this frame
+        double _totalSwarmRuntimeSum = 0; // Sum of all drone runtimes this frame
         int _swarmDroneCount = 0; // Number of drones that reported performance this frame
-        double _averageSwarmRuntimeMs; // Rolling average of swarm performance
+        double _currentSwarmRuntimeSum; // Rolling average of swarm performance
         List<double> _currentFrameRuntimes = new List<double>(); // Store runtimes for current frame
 
         double _lastSwarmCalculation = 0;
@@ -848,10 +848,10 @@ namespace IngameScript
 
                     if (!isThrottled || (_frame % throttleFrames) == 3)
                     {
-                        if (_isController) // If on AND is controller, Update drones with new instructions/positions
+                        if (_isController)
                         {
                             IgcSendHandler();
-                            UpdateSwarmPerformanceAverage();
+                            UpdateSwarmRuntimeSum(); 
                         }
                     }
 
@@ -1467,25 +1467,22 @@ namespace IngameScript
         {
             OutText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
             OutText += $"Avg Runtime: {_averageRuntimeMs:F2}ms\n";
-
+    
             if (_isController)
             {
-                OutText += $"Swarm Avg: {_averageSwarmRuntimeMs:F2}ms | Drones: {_droneEntities.Count}\n";
-                OutText +=
-                    $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm: {(_averageSwarmRuntimeMs / 16.67 * 100):F1}%\n";
+                OutText += $"Swarm Sum: {_currentSwarmRuntimeSum:F2}ms | Drones: {_droneEntities.Count}\n";  // Changed from "Swarm Avg"
+                OutText += $"Controller: {(Runtime.LastRunTimeMs/16.67*100):F1}% | Swarm Total: {(_currentSwarmRuntimeSum/16.67*100):F1}%\n";
             }
-
-            // CHANGE THIS PART - send the average runtime instead of current runtime
-            if (_frame % 60 == 0) // Send every second instead of every 4 frames
+    
+            if (_frame % 60 == 0)
             {
                 if (!_isController)
-                    IGC.SendBroadcastMessage("per", _averageRuntimeMs); // Send average instead of current
+                    IGC.SendBroadcastMessage("per", _averageRuntimeMs);
             }
-
+    
             Echo(OutText);
         }
-
-
+        
         public bool IgcHandler(UpdateType updateSource)
         {
             bool wasMessageRecieved = false;
@@ -1557,17 +1554,14 @@ namespace IngameScript
             return wasMessageRecieved;
         }
 
-        private void UpdateSwarmPerformanceAverage()
+        private void UpdateSwarmRuntimeSum()  // was UpdateSwarmPerformanceAverage
         {
-            if (!_isController || _currentFrameRuntimes.Count == 0) return;
-
-            // Simple average of all reported drone average runtimes
-            double currentSwarmAverage = _currentFrameRuntimes.Sum();
-
-            // Update rolling average
-            _averageSwarmRuntimeMs = currentSwarmAverage;
-
-            // Clear for next batch
+            if (!_isController || _currentFrameRuntimes.Count == 0)
+                return;
+    
+            // Calculate sum instead of average
+            double currentSwarmSum = _currentFrameRuntimes.Sum();
+            _currentSwarmRuntimeSum = currentSwarmSum;  // This is now the SUM
             _currentFrameRuntimes.Clear();
         }
 
