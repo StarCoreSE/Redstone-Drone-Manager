@@ -13,9 +13,6 @@ namespace IngameScript
     {
         #region mdk preserve
 
-        // Updated 11/14/23 //
-
-
         /* CONFIG */
 
         /* GENERAL SETTINGS */
@@ -47,9 +44,12 @@ namespace IngameScript
         // How far (in meters) drones in 'main' mode should orbit from the target. Default [1000]
         int _mainDistance = 1000;
 
-        // Toggles debug mode. Outputs performance, but increases performance cost. Default [250]
-        bool _debug = true;
-
+        // NEW:
+        // WARNING: _debugDraw causes EXTREME performance impact on MS PB!
+        // Only enable in offline singleplayer with Debug Draw API available.
+        // Use at your own risk - will cause severe runtime spikes!
+        bool _debugDraw = true;
+        
         /* PERFORMANCE SETTINGS */
 
         // Runtime threshold in milliseconds - operations throttle above this (PER DRONE)
@@ -551,7 +551,7 @@ namespace IngameScript
             Echo("Set antenna radii to 25km");
 
             // Get LCDs with name containing 'Rocketman' and sets them up
-            if (_isController || _debug)
+            if (_isController)
                 GridTerminalSystem.GetBlocksOfType(_outLcds, b =>
                     b.CubeGrid.EntityId == droneGridId && b.CustomName.ToLower().Contains("rocketman"));
 
@@ -619,7 +619,7 @@ namespace IngameScript
             // Sort afterburners
             RecalcABs();
             Echo($"Sorted {_allABs.Count} afterburners");
-            
+
             List<IMyShipConnector> allConnectors = new List<IMyShipConnector>();
             GridTerminalSystem.GetBlocksOfType(allConnectors, c => c.CubeGrid.EntityId == droneGridId);
             _connector = allConnectors.FirstOrDefault();
@@ -769,6 +769,12 @@ namespace IngameScript
             {
                 _activated = false;
                 IGC.SendBroadcastMessage("-1", "e" + Me.CubeGrid.EntityId);
+
+                // Draw debug elements even when inactive
+
+                DrawDebugElements();
+
+
                 return;
             }
 
@@ -777,20 +783,24 @@ namespace IngameScript
                 if (_isDeploying)
                 {
                     UpdateDeploy();
-                    if (_debug)
-                    {
-                        PrintDebugText();
-                    }
+
+                    // Draw debug elements during deploy
+
+                    DrawDebugElements();
+                    PrintDebugText();
+
+
                     if (_averageRuntimeMs < _runtimeThreshold)
                     {
                         foreach (var l in _outLcds)
                             l.WriteText(OutText);
                     }
+
                     OutText = "";
                     _frame++;
                     return; // Don't run normal drone logic while deploying
                 }
-                
+
                 try
                 {
                     // ALWAYS do these critical operations regardless of performance
@@ -851,7 +861,7 @@ namespace IngameScript
                         if (_isController)
                         {
                             IgcSendHandler();
-                            UpdateSwarmRuntimeSum(); 
+                            UpdateSwarmRuntimeSum();
                         }
                     }
 
@@ -885,13 +895,9 @@ namespace IngameScript
                     _errorCounter++;
                 }
             }
-
-            if (_debug)
-            {
-                PrintDebugText();
-                if (_averageRuntimeMs < _runtimeThreshold * 0.5)
-                    DrawLeadDebugs();
-            }
+            
+            DrawDebugElements();
+            PrintDebugText();
 
             // Check for WeaponCore issues in active drones
             if (_activated && !_doCcrp && _fixedGuns.Count > 0 &&
@@ -1213,7 +1219,6 @@ namespace IngameScript
                     }
                 }
 
-                // Rest of targeting logic...
                 if (!hasValidAimPoint && IsValidVector(_aiTarget.Position))
                 {
                     aimPoint = _aiTarget.Position;
@@ -1257,14 +1262,6 @@ namespace IngameScript
                 stopPosition = _centerOfGrid;
             }
 
-            if (!_aiTarget.IsEmpty() && !isThrottled && IsValidVector(aimPoint))
-            {
-                _d.DrawLine(_centerOfGrid, aimPoint, Color.Red, 0.1f);
-            }
-
-            if (!isThrottled && IsValidVector(stopPosition))
-                _d.DrawGPS("Stop Position", stopPosition);
-
             switch (_mode)
             {
                 case 0:
@@ -1298,9 +1295,6 @@ namespace IngameScript
                             moveTo = _centerOfGrid;
                         }
                     }
-
-                    if (!isThrottled && IsValidVector(moveTo))
-                        _d.DrawLine(_centerOfGrid, moveTo, Color.Blue, 0.1f);
 
                     if (!isThrottled)
                     {
@@ -1383,17 +1377,6 @@ namespace IngameScript
 
                     if (!isThrottled)
                     {
-                        if (IsValidVector(_controllerPos))
-                            _d.DrawLine(_centerOfGrid, _controllerPos, Color.Green, 0.1f);
-                        if (IsValidVector(moveTo))
-                        {
-                            _d.DrawLine(_centerOfGrid, moveTo, Color.Blue, 0.1f);
-                            _d.DrawGPS("Drone Position", moveTo);
-                        }
-                    }
-
-                    if (!isThrottled)
-                    {
                         _closestCollision = CheckCollision(moveTo);
                         if (_closestCollision != new Vector3D() && IsValidVector(_closestCollision))
                         {
@@ -1467,22 +1450,24 @@ namespace IngameScript
         {
             OutText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
             OutText += $"Avg Runtime: {_averageRuntimeMs:F2}ms\n";
-    
+
             if (_isController)
             {
-                OutText += $"Swarm Sum: {_currentSwarmRuntimeSum:F2}ms | Drones: {_droneEntities.Count}\n";  // Changed from "Swarm Avg"
-                OutText += $"Controller: {(Runtime.LastRunTimeMs/16.67*100):F1}% | Swarm Total: {(_currentSwarmRuntimeSum/16.67*100):F1}%\n";
+                OutText +=
+                    $"Swarm Sum: {_currentSwarmRuntimeSum:F2}ms | Drones: {_droneEntities.Count}\n"; // Changed from "Swarm Avg"
+                OutText +=
+                    $"Controller: {(Runtime.LastRunTimeMs / 16.67 * 100):F1}% | Swarm Total: {(_currentSwarmRuntimeSum / 16.67 * 100):F1}%\n";
             }
-    
+
             if (_frame % 60 == 0)
             {
                 if (!_isController)
                     IGC.SendBroadcastMessage("per", _averageRuntimeMs);
             }
-    
+
             Echo(OutText);
         }
-        
+
         public bool IgcHandler(UpdateType updateSource)
         {
             bool wasMessageRecieved = false;
@@ -1554,14 +1539,14 @@ namespace IngameScript
             return wasMessageRecieved;
         }
 
-        private void UpdateSwarmRuntimeSum()  // was UpdateSwarmPerformanceAverage
+        private void UpdateSwarmRuntimeSum() // was UpdateSwarmPerformanceAverage
         {
             if (!_isController || _currentFrameRuntimes.Count == 0)
                 return;
-    
+
             // Calculate sum instead of average
             double currentSwarmSum = _currentFrameRuntimes.Sum();
-            _currentSwarmRuntimeSum = currentSwarmSum;  // This is now the SUM
+            _currentSwarmRuntimeSum = currentSwarmSum; // This is now the SUM
             _currentFrameRuntimes.Clear();
         }
 
@@ -1645,11 +1630,7 @@ namespace IngameScript
             if ((_mode == 1) && _frame % 2 == 0)
             {
                 MatrixD m = _cockpit.IsFunctional ? _cockpit.WorldMatrix : Me.WorldMatrix;
-
-                bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
-                if (!isThrottled)
-                    _d.DrawLine(_centerOfGrid, _centerOfGrid + m.Up * 100, Color.Blue, 0.1f);
-
+                
                 if (_rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, _orbitsPerSecond % 360 / _frame / 57.2957795f);
 
@@ -1691,10 +1672,6 @@ namespace IngameScript
                                  _maxOffset;
                 foreach (var weapon in _fixedGuns)
                 {
-                    if (!isThrottled)
-                        _d.DrawLine(_centerOfGrid,
-                            Me.WorldMatrix.Forward * _targeting.GetMaxRange(weapon) + _centerOfGrid,
-                            Color.White, 0.5f);
                     if (isLinedUp && _targeting.GetWeaponReady(weapon))
                     {
                         Fire(weapon, true);
@@ -2411,60 +2388,176 @@ namespace IngameScript
         void UpdateDeploy()
         {
             if (!_isDeploying) return;
-            
+
             OutText += $"Deploy Debug:\n";
             OutText += $"  Controller Pos: {_controllerPos}\n";
             OutText += $"  Is Valid: {IsValidVector(_controllerPos)}\n";
             OutText += $"  Is Zero: {_controllerPos == Vector3D.Zero}\n";
-    
+
             // Calculate current distance from start position
             double distanceFromStart = Vector3D.Distance(_deployStartPos, Me.CubeGrid.GetPosition());
-    
+
             if (distanceFromStart >= _deployDistance)
             {
                 // Deploy distance reached - but don't immediately start normal operations
                 _isDeploying = false;
                 Echo("Deploy distance reached - waiting for controller data...");
-        
+
                 // Set to inactive and wait for proper controller data
                 _activated = false;
                 _mode = 1; // Set to wing mode for when we do activate
-        
+
                 // Stop all movement
                 SetThrust(-1f, _allThrust, false);
                 _gyros.Reset();
-        
+
                 // Let the normal IGC handler and activation logic take over
                 // This ensures _controllerPos is properly set before moving
                 return;
             }
-    
+
             // Continue moving in deploy direction
             Vector3D targetPos = _deployStartPos + (_deployDirection * _deployDistance);
             Vector3D currentPos = Me.CubeGrid.GetPosition();
             Vector3D moveVector = targetPos - currentPos;
-    
+
             // Use existing thrust control system
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, currentPos);
             if (!IsValidVector(stopPosition))
             {
                 stopPosition = currentPos;
             }
-    
+
             Vector3D thrustVector = stopPosition - targetPos;
             if (IsValidVector(thrustVector))
             {
-                ThrustControl(thrustVector, _upThrust, _downThrust, _leftThrust, _rightThrust, _forwardThrust, _backThrust);
+                ThrustControl(thrustVector, _upThrust, _downThrust, _leftThrust, _rightThrust, _forwardThrust,
+                    _backThrust);
             }
-    
+
             // Point forward in deploy direction
             if (IsValidVector(_deployDirection))
             {
                 _gyros.FaceVectors(_deployDirection, Me.WorldMatrix.Up);
             }
-    
+
             OutText += $"DEPLOYING: {distanceFromStart:F1}m / {_deployDistance}m\n";
         }
-        
+
+        void DrawDebugElements()
+        {
+            if (!_debugDraw) return;
+
+            // Note: _d.RemoveAll() is called at the start of Main() to clear previous frame
+
+            // Always draw current target if we have one
+            if (!_aiTarget.IsEmpty() && IsValidVector(_aiTarget.Position))
+            {
+                _d.DrawGPS("AI Target", _aiTarget.Position, Color.Red);
+                _d.DrawLine(_centerOfGrid, _aiTarget.Position, Color.Red, 0.1f);
+            }
+
+            // Draw predicted target position
+            if (IsValidVector(_predictedTargetPos) && _predictedTargetPos != Vector3D.Zero)
+            {
+                _d.DrawGPS("Predicted Target", _predictedTargetPos, Color.Orange);
+                _d.DrawLine(_centerOfGrid, _predictedTargetPos, Color.Orange, 0.15f);
+            }
+
+            // Draw controller position and connection
+            if (IsValidVector(_controllerPos) && _controllerPos != Vector3D.Zero)
+            {
+                _d.DrawGPS("Controller", _controllerPos, Color.Green);
+                _d.DrawLine(_centerOfGrid, _controllerPos, Color.Green, 0.1f);
+            }
+
+            // Draw movement target
+            if (IsValidVector(_resultPos) && _resultPos != Vector3D.Zero)
+            {
+                _d.DrawGPS("Move Target", _resultPos, Color.Blue);
+                _d.DrawLine(_centerOfGrid, _resultPos, Color.Blue, 0.1f);
+            }
+
+            // Draw formation position when in formation mode
+            if (_mode == 1 && IsValidMatrix(_ctrlMatrix) && _id >= 0 && _id < _formationPresets[_formation].Length)
+            {
+                Vector3D formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
+                if (IsValidVector(formationOffset) && IsValidVector(_controllerPos))
+                {
+                    Vector3D formationPos = _controllerPos + formationOffset;
+                    _d.DrawGPS($"Formation_{_id}", formationPos, Color.Yellow);
+                    _d.DrawLine(_centerOfGrid, formationPos, Color.Yellow, 0.08f);
+                }
+            }
+
+            // Draw weapon ranges and firing directions
+            if (_fixedGuns.Count > 0 && !_aiTarget.IsEmpty())
+            {
+                foreach (var weapon in _fixedGuns)
+                {
+                    if (weapon != null && weapon.IsFunctional)
+                    {
+                        try
+                        {
+                            double range = _targeting.GetMaxRange(weapon);
+                            Vector3D weaponEnd = _centerOfGrid + Me.WorldMatrix.Forward * range;
+                            _d.DrawLine(_centerOfGrid, weaponEnd, Color.White, 0.05f);
+                        }
+                        catch
+                        {
+                            // Ignore weapon range errors
+                        }
+                    }
+                }
+            }
+
+            // Draw collision avoidance
+            if (_closestCollision != Vector3D.Zero && IsValidVector(_closestCollision))
+            {
+                _d.DrawLine(_centerOfGrid, _closestCollision, Color.Orange, 0.2f);
+                _d.DrawGPS("Collision Risk", _closestCollision, Color.Orange);
+            }
+
+            // Draw controller orientation when in formation
+            if (_mode == 1 && IsValidMatrix(_ctrlMatrix) && IsValidVector(_controllerPos))
+            {
+                Vector3D orientationEnd = _controllerPos + _ctrlMatrix.Forward * 200;
+                _d.DrawLine(_controllerPos, orientationEnd, Color.Blue, 0.1f);
+            }
+
+            // Draw stop position
+            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, _centerOfGrid);
+            if (IsValidVector(stopPosition) && stopPosition != _centerOfGrid)
+            {
+                _d.DrawGPS("Stop Position", stopPosition, Color.Cyan);
+                _d.DrawLine(_centerOfGrid, stopPosition, Color.Cyan, 0.05f);
+            }
+
+            // Draw velocity vector
+            if (IsValidVector(Me.CubeGrid.LinearVelocity) && Me.CubeGrid.LinearVelocity.LengthSquared() > 1)
+            {
+                Vector3D velocityEnd = _centerOfGrid + Me.CubeGrid.LinearVelocity * 10;
+                _d.DrawLine(_centerOfGrid, velocityEnd, Color.Purple, 0.08f);
+            }
+
+            // Draw deploy information when deploying
+            if (_isDeploying)
+            {
+                if (IsValidVector(_deployStartPos))
+                {
+                    _d.DrawGPS("Deploy Start", _deployStartPos, Color.White);
+                }
+
+                Vector3D deployTarget = _deployStartPos + (_deployDirection * _deployDistance);
+                if (IsValidVector(deployTarget))
+                {
+                    _d.DrawGPS("Deploy Target", deployTarget, Color.Lime);
+                    _d.DrawLine(_deployStartPos, deployTarget, Color.Lime, 0.15f);
+                }
+            }
+
+            // Always draw ammo lead positions (moved from conditional drawing)
+            DrawLeadDebugs();
+        }
     }
 }
