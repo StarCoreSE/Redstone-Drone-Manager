@@ -98,19 +98,48 @@ public class GyroControl
 
     private void ApplyGyroOverride(MatrixD worldMatrix, Vector3D rotationVector)
     {
-        var transformedRotationVec = Vector3D.TransformNormal(rotationVector, worldMatrix);
-
-        foreach (var gyro in _gyros)
+        if (_gyros.Count == 0) return;
+    
+        // Find first functional gyro as master
+        IMyGyro masterGyro = null;
+        int masterIndex = -1;
+    
+        for (int i = 0; i < _gyros.Count; i++)
         {
-            var gyroRotationVec = Vector3D.TransformNormal(transformedRotationVec, MatrixD.Transpose(gyro.WorldMatrix));
-
-            if (!gyroRotationVec.IsValid())
-                throw new Exception("Invalid gyro rotation vector: " + gyroRotationVec.ToString());
-
-            gyro.Pitch = (float)gyroRotationVec.X;
-            gyro.Yaw = (float)gyroRotationVec.Y;
-            gyro.Roll = (float)gyroRotationVec.Z;
-            gyro.GyroOverride = true;
+            if (_gyros[i]?.IsFunctional == true)
+            {
+                masterGyro = _gyros[i];
+                masterIndex = i;
+                break;
+            }
+        }
+    
+        if (masterGyro == null) return; // No working gyros
+    
+        // Apply control to master, disable others
+        for (int i = 0; i < _gyros.Count; i++)
+        {
+            var gyro = _gyros[i];
+            if (gyro == null || !gyro.IsFunctional) continue;
+        
+            if (i == masterIndex)
+            {
+                // Master gyro - apply rotation
+                var transformedRotationVec = Vector3D.TransformNormal(rotationVector, worldMatrix);
+                var gyroRotationVec = Vector3D.TransformNormal(transformedRotationVec, MatrixD.Transpose(gyro.WorldMatrix));
+            
+                if (!gyroRotationVec.IsValid()) return;
+            
+                gyro.Pitch = (float)gyroRotationVec.X;
+                gyro.Yaw = (float)gyroRotationVec.Y;
+                gyro.Roll = (float)gyroRotationVec.Z;
+                gyro.GyroOverride = true;
+            }
+            else
+            {
+                // Slave gyros - turn off override
+                gyro.GyroOverride = false;
+            }
         }
     }
 

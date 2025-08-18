@@ -13,6 +13,9 @@ namespace IngameScript
     {
         #region mdk preserve
 
+        // Originally made by Aristeas for StarCore, modified by Invalid.
+        // https://github.com/StarCoreSE/Rocketman-Drone-Manager-Invalid
+
         /* CONFIG */
 
         /* GENERAL SETTINGS */
@@ -422,10 +425,8 @@ namespace IngameScript
             Echo("Initialized dsAPI");
 
             // Init Debug Draw API
-
             _d = new DebugAPI(this);
             Echo("Initialized debugAPI");
-
 
             // Squares zoneRadius to avoid Vector3D.Distance() calls. Roots are quite unperformant.
             _zoneRadius *= _zoneRadius;
@@ -580,8 +581,6 @@ namespace IngameScript
 
             Echo($"Found {_fixedGuns.Count} fixed weapons");
 
-            Echo($"Found {_fixedGuns.Count} fixed weapons");
-
             try
             {
                 if (_fixedGuns.Count > 0)
@@ -594,8 +593,7 @@ namespace IngameScript
                         _healAmmo = splitCustomData[0];
                         _damageAmmo = splitCustomData[1];
 
-                        Echo(
-                            $"Set ammo types to:\n    HEAL - {_healAmmo}\n    DAMAGE - {_damageAmmo}");
+                        Echo($"Set ammo types to:\n    HEAL - {_healAmmo}\n    DAMAGE - {_damageAmmo}");
                     }
                 }
             }
@@ -691,22 +689,12 @@ namespace IngameScript
 
             Echo("AutoFlare module initialized\n" + _flares.Count + " flares detected");
 
-            // Sets PB surface to text for error reporting.
-            // Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
-
             GridId = Me.CubeGrid.EntityId;
             _frame = 0;
 
-            Echo("Successfully initialized as a " + (_isController ? "controller." : "drone.") +
-                 "");
-
-            // Clear any stale targeting data
-            // aiTarget = new MyDetectedEntityInfo();
-
-            GridId = Me.CubeGrid.EntityId;
+            Echo("Successfully initialized as a " + (_isController ? "controller." : "drone."));
             Echo($"Drone initialized on grid entity ID: {GridId}");
         }
-
 
         int _errorCounter;
 
@@ -1480,7 +1468,7 @@ namespace IngameScript
         {
             bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
             if (isThrottled && _frame % 3 != 0) return false;
-            
+
             bool wasMessageRecieved = false;
             // If IGC message recieved
             try
