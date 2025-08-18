@@ -1478,6 +1478,9 @@ namespace IngameScript
 
         public bool IgcHandler(UpdateType updateSource)
         {
+            bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
+            if (isThrottled && _frame % 3 != 0) return false;
+            
             bool wasMessageRecieved = false;
             // If IGC message recieved
             try
