@@ -1,6 +1,7 @@
 ﻿using Sandbox.ModAPI.Ingame;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using VRageMath;
 
 /// <summary>
@@ -11,12 +12,16 @@ public class GyroControl
     private List<IMyGyro> _gyros;
     private IMyTerminalBlock _reference;
     private Vector3PID _pid;
+    private long _gridId; 
 
     public GyroControl(MyGridProgram program, IMyTerminalBlock reference, double kP, double kI, double kD, double lowerBound, double upperBound, double timeStep)
     {
         _reference = reference;
+        _gridId = reference.CubeGrid.EntityId; // Store the grid ID
         _gyros = new List<IMyGyro>();
-        program.GridTerminalSystem.GetBlocksOfType(_gyros);
+        
+        // Filter gyros to only those on our grid
+        program.GridTerminalSystem.GetBlocksOfType(_gyros, g => g.CubeGrid.EntityId == _gridId);
         
         _pid = new Vector3PID(kP, kI, kD, lowerBound, upperBound, timeStep);
         Reset();
@@ -25,7 +30,11 @@ public class GyroControl
     public GyroControl(MyGridProgram program, IMyTerminalBlock reference, List<IMyGyro> gyros, double kP, double kI, double kD, double lowerBound, double upperBound, double timeStep)
     {
         _reference = reference;
-        _gyros = gyros;
+        _gridId = reference.CubeGrid.EntityId;
+        
+        // Filter the provided gyros list
+        _gyros = gyros.Where(g => g.CubeGrid.EntityId == _gridId).ToList();
+        
         _pid = new Vector3PID(kP, kI, kD, lowerBound, upperBound, timeStep);
         Reset();
     }

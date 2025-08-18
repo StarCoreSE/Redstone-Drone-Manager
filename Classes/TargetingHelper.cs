@@ -67,22 +67,26 @@ namespace IngameScript
 
         public virtual List<T> GetWeapons<T>(List<T> weapons) where T : class, IMyTerminalBlock
         {
-            program.GridTerminalSystem.GetBlocksOfType(weapons, w => wepCheck(w));
-
+            program.GridTerminalSystem.GetBlocksOfType(weapons, w => 
+                w.CubeGrid.EntityId == program.GridId && wepCheck(w));
             return weapons;
         }
 
         public virtual List<T> GetWeapons<T>(List<T> weapons, string group) where T : class, IMyTerminalBlock
         {
-            program.GridTerminalSystem.GetBlockGroupWithName(group).GetBlocksOfType(weapons, w => wepCheck(w));
-
+            var blockGroup = program.GridTerminalSystem.GetBlockGroupWithName(group);
+            if (blockGroup != null)
+            {
+                blockGroup.GetBlocksOfType(weapons, w => 
+                    w.CubeGrid.EntityId == program.GridId && wepCheck(w));
+            }
             return weapons;
         }
 
         public virtual List<T> GetWeapons<T>(List<T> weapons, Func<IMyTerminalBlock, bool> collect) where T : class, IMyTerminalBlock
         {
-            program.GridTerminalSystem.GetBlocksOfType(weapons, w => collect(w) && wepCheck(w));
-
+            program.GridTerminalSystem.GetBlocksOfType(weapons, w => 
+                w.CubeGrid.EntityId == program.GridId && collect(w) && wepCheck(w));
             return weapons;
         }
 

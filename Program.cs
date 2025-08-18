@@ -126,15 +126,10 @@ namespace IngameScript
 
 
         // DON'T EDIT BELOW THIS LINE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING //
-        // OR YOU'RE ARISTEAS //
-        //or you're oat :P//
-        // I CAN'T STOP MYSELF //
 
         #endregion
 
         // In Development Version //
-        //now with 2!!! contributers!!!!1!11!1!!!111!//
-        // holy hell //
 
         int _mode = 1;
         /*
@@ -620,7 +615,7 @@ namespace IngameScript
             Echo($"Sorted {_allABs.Count} afterburners");
 
             // Get all thrust
-            GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid == Me.CubeGrid);
+            GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == GridId);
             Echo($"Found {_allThrust.Count} thrusters on own grid");
 
             // Sort thrust and calculate total thrust per direction
@@ -2190,6 +2185,14 @@ namespace IngameScript
 
         public void RecalcThrust()
         {
+            _forwardThrust.Clear();
+            _backThrust.Clear();
+            _upThrust.Clear();
+            _downThrust.Clear();
+            _leftThrust.Clear();
+            _rightThrust.Clear();
+            Array.Clear(_thrustAmt, 0, _thrustAmt.Length);
+            
             foreach (var thrust in _allThrust)
             {
                 /*
