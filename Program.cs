@@ -371,6 +371,12 @@ namespace IngameScript
 
         bool _pendingRecovery = false;
 
+        bool _isDeploying = false;
+        Vector3D _deployStartPos;
+        Vector3D _deployDirection;
+        double _deployDistance = 100;
+        IMyShipConnector _connector;
+
         #endregion
 
 
@@ -613,6 +619,11 @@ namespace IngameScript
             // Sort afterburners
             RecalcABs();
             Echo($"Sorted {_allABs.Count} afterburners");
+            
+            List<IMyShipConnector> allConnectors = new List<IMyShipConnector>();
+            GridTerminalSystem.GetBlocksOfType(allConnectors, c => c.CubeGrid.EntityId == droneGridId);
+            _connector = allConnectors.FirstOrDefault();
+            Echo($"Found {allConnectors.Count} connectors for deploy functionality");
 
             // Get all thrust
             GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == GridId);
@@ -707,7 +718,7 @@ namespace IngameScript
 
             // Update performance average using EMA
             _averageRuntimeMs = RuntimeSignificance * Runtime.LastRunTimeMs +
-                               (1 - RuntimeSignificance) * _averageRuntimeMs;
+                                (1 - RuntimeSignificance) * _averageRuntimeMs;
 
             if (!string.IsNullOrEmpty(argument) &&
                 (argument == "recover" || argument == "recycle" || argument == "reset"))
@@ -763,6 +774,23 @@ namespace IngameScript
 
             if (_activated) // Generic "I'm on!" stuff
             {
+                if (_isDeploying)
+                {
+                    UpdateDeploy();
+                    if (_debug)
+                    {
+                        PrintDebugText();
+                    }
+                    if (_averageRuntimeMs < _runtimeThreshold)
+                    {
+                        foreach (var l in _outLcds)
+                            l.WriteText(OutText);
+                    }
+                    OutText = "";
+                    _frame++;
+                    return; // Don't run normal drone logic while deploying
+                }
+                
                 try
                 {
                     // ALWAYS do these critical operations regardless of performance
@@ -826,12 +854,12 @@ namespace IngameScript
                             UpdateSwarmPerformanceAverage();
                         }
                     }
-                    
+
                     if (!_isController) //throttling this will make it impossible to aim fug
                     {
                         //if (!isThrottled || (frame % throttleFrames) == 4)
                         //{
-                            RunActiveDrone();
+                        RunActiveDrone();
                         //}
                     }
 
@@ -911,6 +939,7 @@ namespace IngameScript
             // Reset core drone state
             _id = -1;
             _activated = false;
+            _isDeploying = false;
             _lastControllerPing = 0;
             _aiTarget = new MyDetectedEntityInfo();
             _cachedPredictedPos = new Vector3D();
@@ -1173,7 +1202,8 @@ namespace IngameScript
                     int ammoUpdateInterval = isThrottled ? 60 : 30;
                     if (_frame % ammoUpdateInterval == 0)
                     {
-                        _cachedPrimaryAmmo = wcTargeting.wAPI.GetActiveAmmo(_fixedGuns.First(), _weaponMap.First().Value);
+                        _cachedPrimaryAmmo =
+                            wcTargeting.wAPI.GetActiveAmmo(_fixedGuns.First(), _weaponMap.First().Value);
                     }
 
                     if (hasValidAimPoint)
@@ -1668,7 +1698,8 @@ namespace IngameScript
                 foreach (var weapon in _fixedGuns)
                 {
                     if (!isThrottled)
-                        _d.DrawLine(_centerOfGrid, Me.WorldMatrix.Forward * _targeting.GetMaxRange(weapon) + _centerOfGrid,
+                        _d.DrawLine(_centerOfGrid,
+                            Me.WorldMatrix.Forward * _targeting.GetMaxRange(weapon) + _centerOfGrid,
                             Color.White, 0.5f);
                     if (isLinedUp && _targeting.GetWeaponReady(weapon))
                     {
@@ -1952,6 +1983,19 @@ namespace IngameScript
 
                     break;
 
+                case "deploy":
+                    if (!_isController)
+                    {
+                        StartDeploy();
+                    }
+                    else if (_isController && updateSource != UpdateType.IGC)
+                    {
+                        SendGroupMsg<string>("deploy", true);
+                        IGC.SendBroadcastMessage("-1", "deploy");
+                    }
+
+                    return;
+
                 case "recover":
                 case "recycle":
                 case "reset":
@@ -2081,13 +2125,19 @@ namespace IngameScript
             // Calculate time to stop for each (local) axis
             _timeToStop = new Vector3D(
                 Math.Abs(_accel.X) > 0.001 && Math.Abs(_accelR.X) > 0.001
-                    ? (_accel.X + rVelocity.X < rVelocity.X - _accelR.X ? rVelocity.X / _accel.X : rVelocity.X / _accelR.X)
+                    ? (_accel.X + rVelocity.X < rVelocity.X - _accelR.X
+                        ? rVelocity.X / _accel.X
+                        : rVelocity.X / _accelR.X)
                     : 0,
                 Math.Abs(_accel.Y) > 0.001 && Math.Abs(_accelR.Y) > 0.001
-                    ? (_accel.Y + rVelocity.Y < rVelocity.Y - _accelR.Y ? rVelocity.Y / _accel.Y : rVelocity.Y / _accelR.Y)
+                    ? (_accel.Y + rVelocity.Y < rVelocity.Y - _accelR.Y
+                        ? rVelocity.Y / _accel.Y
+                        : rVelocity.Y / _accelR.Y)
                     : 0,
                 Math.Abs(_accel.Z) > 0.001 && Math.Abs(_accelR.Z) > 0.001
-                    ? (_accel.Z + rVelocity.Z < rVelocity.Z - _accelR.Z ? rVelocity.Z / _accel.Z : rVelocity.Z / _accelR.Z)
+                    ? (_accel.Z + rVelocity.Z < rVelocity.Z - _accelR.Z
+                        ? rVelocity.Z / _accel.Z
+                        : rVelocity.Z / _accelR.Z)
                     : 0
             );
 
@@ -2192,7 +2242,7 @@ namespace IngameScript
             _leftThrust.Clear();
             _rightThrust.Clear();
             Array.Clear(_thrustAmt, 0, _thrustAmt.Length);
-            
+
             foreach (var thrust in _allThrust)
             {
                 /*
@@ -2332,5 +2382,95 @@ namespace IngameScript
 
             return _runIndicator;
         }
+
+        void StartDeploy()
+        {
+            // Find connector on this grid
+            List<IMyShipConnector> connectors = new List<IMyShipConnector>();
+            GridTerminalSystem.GetBlocksOfType(connectors, c => c.CubeGrid.EntityId == GridId);
+
+            _connector = connectors.FirstOrDefault(c => c.Status == MyShipConnectorStatus.Connected);
+
+            if (_connector == null)
+            {
+                Echo("No connected connector found for deploy!");
+                return;
+            }
+
+            // Store starting position
+            _deployStartPos = Me.CubeGrid.GetPosition();
+
+            // Calculate deploy direction (opposite of connector's forward direction)
+            _deployDirection = -_connector.WorldMatrix.Forward;
+
+            // Disconnect from connector
+            _connector.Disconnect();
+
+            // Set deploy state
+            _isDeploying = true;
+            _activated = true;
+            Runtime.UpdateFrequency = UpdateFrequency.Update1;
+
+            Echo($"Deploy started - moving {_deployDistance}m in direction: {_deployDirection}");
+        }
+
+        void UpdateDeploy()
+        {
+            if (!_isDeploying) return;
+            
+            OutText += $"Deploy Debug:\n";
+            OutText += $"  Controller Pos: {_controllerPos}\n";
+            OutText += $"  Is Valid: {IsValidVector(_controllerPos)}\n";
+            OutText += $"  Is Zero: {_controllerPos == Vector3D.Zero}\n";
+    
+            // Calculate current distance from start position
+            double distanceFromStart = Vector3D.Distance(_deployStartPos, Me.CubeGrid.GetPosition());
+    
+            if (distanceFromStart >= _deployDistance)
+            {
+                // Deploy distance reached - but don't immediately start normal operations
+                _isDeploying = false;
+                Echo("Deploy distance reached - waiting for controller data...");
+        
+                // Set to inactive and wait for proper controller data
+                _activated = false;
+                _mode = 1; // Set to wing mode for when we do activate
+        
+                // Stop all movement
+                SetThrust(-1f, _allThrust, false);
+                _gyros.Reset();
+        
+                // Let the normal IGC handler and activation logic take over
+                // This ensures _controllerPos is properly set before moving
+                return;
+            }
+    
+            // Continue moving in deploy direction
+            Vector3D targetPos = _deployStartPos + (_deployDirection * _deployDistance);
+            Vector3D currentPos = Me.CubeGrid.GetPosition();
+            Vector3D moveVector = targetPos - currentPos;
+    
+            // Use existing thrust control system
+            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, currentPos);
+            if (!IsValidVector(stopPosition))
+            {
+                stopPosition = currentPos;
+            }
+    
+            Vector3D thrustVector = stopPosition - targetPos;
+            if (IsValidVector(thrustVector))
+            {
+                ThrustControl(thrustVector, _upThrust, _downThrust, _leftThrust, _rightThrust, _forwardThrust, _backThrust);
+            }
+    
+            // Point forward in deploy direction
+            if (IsValidVector(_deployDirection))
+            {
+                _gyros.FaceVectors(_deployDirection, Me.WorldMatrix.Up);
+            }
+    
+            OutText += $"DEPLOYING: {distanceFromStart:F1}m / {_deployDistance}m\n";
+        }
+        
     }
 }
