@@ -465,11 +465,12 @@ namespace IngameScript
             // Get cockpit for controller
             GridTerminalSystem.GetBlocksOfType<IMyCockpit>(null, b =>
             {
-                if (b.CubeGrid.EntityId == droneGridId && b.CanControlShip)
+                if (b.CubeGrid.EntityId == droneGridId)
                 {
                     _cockpit = b;
                     return true;
                 }
+
                 return false;
             });
             Echo("Searched for cockpit on own grid " + (_cockpit == null ? "null" : _cockpit.CustomName));
@@ -526,11 +527,12 @@ namespace IngameScript
             // Autosets mass if ship controller detected
             GridTerminalSystem.GetBlocksOfType<IMyShipController>(null, b =>
             {
-                if (b.CubeGrid.EntityId == droneGridId && b.CanControlShip)
+                if (b.CubeGrid.EntityId == droneGridId)
                 {
                     _mass = b.CalculateShipMass().TotalMass;
                     return true;
                 }
+
                 return false;
             });
             Echo("Set grid mass to " + _mass);
@@ -1157,42 +1159,27 @@ namespace IngameScript
 
         void RunActiveDrone()
         {
+            // Early validation to avoid expensive operations on invalid targets
             bool hasValidTarget = !_aiTarget.IsEmpty() && IsValidVector(_aiTarget.Position) && _aiTarget.EntityId != 0;
+
             OutText += hasValidTarget ? $"Locked onto {_aiTarget.Name}\n" : "No valid target\n";
 
-            // Debug info for controller
-            if (_cockpit != null && _cockpit.IsFunctional)
-            {
-                OutText += "Controller cockpit: FUNCTIONAL\n";
-                OutText += $"Controller pos: {_cockpit.GetPosition()}\n";
-            }
-            else
-            {
-                OutText += "Controller cockpit: NOT FUNCTIONAL\n";
-            }
+            if (_frame % 2 == 0) ActiveDroneFrame2();
 
-            if (IsValidMatrix(_ctrlMatrix))
-            {
-                OutText += "Controller matrix: VALID\n";
-            }
-            else
-            {
-                OutText += "Controller matrix: INVALID\n";
-            }
-
-            if (_frame % 2 == 0)
-                ActiveDroneFrame2();
-
+            // Calculate throttle state once for the entire method
             bool isThrottled = _averageRuntimeMs >= _runtimeThreshold;
+
             Vector3D aimPoint = new Vector3D();
             Vector3D aimDirection = Me.WorldMatrix.Forward;
             bool hasValidAimPoint = false;
 
+            // Only do expensive targeting operations if we have a valid target
             if (hasValidTarget)
             {
                 if (_targeting is WCTargetingHelper && _fixedGuns.Count > 0)
                 {
                     WCTargetingHelper wcTargeting = (WCTargetingHelper)_targeting;
+
                     int weaponUpdateInterval = isThrottled ? 120 : 60;
                     if (_frame % weaponUpdateInterval == 0 && _fixedGuns.First() != null)
                     {
@@ -1225,6 +1212,7 @@ namespace IngameScript
                     }
                 }
 
+                // Fallback to direct target position if WeaponCore prediction failed
                 if (!hasValidAimPoint)
                 {
                     aimPoint = _aiTarget.Position;
@@ -1248,58 +1236,33 @@ namespace IngameScript
                     }
                 }
             }
+            else
+            {
+                // No valid target - use controller orientation if available
+                if (IsValidMatrix(_ctrlMatrix))
+                {
+                    aimDirection = _ctrlMatrix.Forward;
+                }
+                else
+                {
+                    aimDirection = Me.WorldMatrix.Forward;
+                }
+            }
 
             Vector3D moveTo = new Vector3D();
             Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, _centerOfGrid);
+
             if (!IsValidVector(stopPosition))
             {
                 stopPosition = _centerOfGrid;
             }
 
-            // Get controller direction - prefer the actual cockpit over the matrix
-            Vector3D controllerForward = Me.WorldMatrix.Forward;
-            Vector3D controllerUp = Me.WorldMatrix.Up;
-
-            if (_cockpit != null && _cockpit.IsFunctional)
-            {
-                controllerForward = _cockpit.WorldMatrix.Forward;
-                controllerUp = _cockpit.WorldMatrix.Up;
-                OutText += "Using cockpit orientation\n";
-            }
-            else if (IsValidMatrix(_ctrlMatrix))
-            {
-                controllerForward = _ctrlMatrix.Forward;
-                controllerUp = _ctrlMatrix.Up;
-                OutText += "Using matrix orientation\n";
-            }
-            else
-            {
-                OutText += "No controller orientation available\n";
-            }
-
             switch (_mode)
             {
                 case 0:
-                    if (hasValidTarget)
+                    if (IsValidVector(aimDirection))
                     {
-                        if (IsValidVector(aimDirection))
-                        {
-                            _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                            OutText += "Mode 0: Aiming at target\n";
-                        }
-                    }
-                    else
-                    {
-                        // No target - face controller direction
-                        if (IsValidVector(controllerForward))
-                        {
-                            _gyros.FaceVectors(controllerForward, controllerUp);
-                            OutText += "Mode 0: Facing controller direction\n";
-                        }
-                        else
-                        {
-                            OutText += "Mode 0: No valid controller direction\n";
-                        }
+                        _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     }
 
                     if (hasValidTarget)
@@ -1317,16 +1280,7 @@ namespace IngameScript
                     }
                     else
                     {
-                        Vector3D formationOffset = Vector3D.Zero;
-                        if (_cockpit != null && _cockpit.IsFunctional)
-                        {
-                            formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _cockpit.WorldMatrix);
-                        }
-                        else if (IsValidMatrix(_ctrlMatrix))
-                        {
-                            formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
-                        }
-
+                        Vector3D formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
                         if (IsValidVector(formationOffset) && IsValidVector(_controllerPos))
                         {
                             moveTo = _controllerPos + formationOffset;
@@ -1354,66 +1308,59 @@ namespace IngameScript
 
                 case 1:
                     double dSq = Vector3D.DistanceSquared(_controllerPos, Me.CubeGrid.GetPosition());
+
                     if (!_healMode && _damageAmmo != "" && _targeting is WCTargetingHelper &&
                         _frame % (isThrottled ? 60 : 30) == 0)
                     {
                         WCTargetingHelper wCTargeting = (WCTargetingHelper)_targeting;
                         foreach (var wep in _fixedGuns)
                         {
-                            if (wCTargeting.wAPI.GetActiveAmmo(wep, 0) == _damageAmmo)
-                                break;
+                            if (wCTargeting.wAPI.GetActiveAmmo(wep, 0) == _damageAmmo) break;
                             wep.SetValue<Int64>("WC_PickAmmo", 0);
                         }
                     }
 
                     Vector3D formationAimDirection;
-                    Vector3D formationUpDirection = Me.WorldMatrix.Up;
-
                     if (dSq > _formDistance * _formDistance * 4 || _healMode)
                     {
                         Vector3D toController = _controllerPos - _centerOfGrid;
                         if (IsValidVector(toController) && toController.LengthSquared() > 0.01)
                         {
                             formationAimDirection = Vector3D.Normalize(toController);
-                            OutText += "Mode 1: Facing controller (distant)\n";
                         }
                         else
                         {
-                            formationAimDirection = controllerForward;
-                            formationUpDirection = controllerUp;
-                            OutText += "Mode 1: Using controller forward (distant)\n";
+                            formationAimDirection = Me.WorldMatrix.Forward;
                         }
                     }
                     else if (hasValidTarget && IsValidVector(aimDirection))
                     {
                         formationAimDirection = aimDirection;
-                        OutText += "Mode 1: Aiming at target\n";
+                    }
+                    else if (IsValidMatrix(_ctrlMatrix))
+                    {
+                        formationAimDirection = _ctrlMatrix.Forward;
                     }
                     else
                     {
-                        formationAimDirection = controllerForward;
-                        formationUpDirection = controllerUp;
-                        OutText += "Mode 1: Facing controller direction\n";
+                        formationAimDirection = Me.WorldMatrix.Forward;
                     }
 
                     if (!IsValidVector(formationAimDirection))
                     {
                         formationAimDirection = Me.WorldMatrix.Forward;
-                        formationUpDirection = Me.WorldMatrix.Up;
                     }
 
-                    _gyros.FaceVectors(formationAimDirection, formationUpDirection);
-
-                    Vector3D formationPos = Vector3D.Zero;
-                    if (_cockpit != null && _cockpit.IsFunctional)
+                    if (hasValidTarget && !_healMode && IsValidVector(aimDirection))
                     {
-                        formationPos = Vector3D.Rotate(_formationPresets[_formation][_id], _cockpit.WorldMatrix);
+                        _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     }
-                    else if (IsValidMatrix(_ctrlMatrix))
+                    else
                     {
-                        formationPos = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
+                        _gyros.FaceVectors(formationAimDirection, Me.WorldMatrix.Up);
                     }
 
+                    Vector3D formationPos = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
                     if (IsValidVector(formationPos) && IsValidVector(_controllerPos))
                     {
                         moveTo = _controllerPos + formationPos;
@@ -1439,42 +1386,12 @@ namespace IngameScript
                     break;
 
                 case 2:
-                    if (hasValidTarget)
+                    if (IsValidVector(aimDirection))
                     {
-                        if (IsValidVector(aimDirection))
-                        {
-                            _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
-                            OutText += "Mode 2: Aiming at target\n";
-                        }
-                    }
-                    else
-                    {
-                        // No target - face controller direction
-                        if (IsValidVector(controllerForward))
-                        {
-                            _gyros.FaceVectors(controllerForward, controllerUp);
-                            OutText += "Mode 2: Facing controller direction\n";
-                        }
-                        else
-                        {
-                            OutText += "Mode 2: No valid controller direction\n";
-                        }
+                        _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     }
 
-                    Vector3D fortifyPos = Vector3D.Zero;
-                    if (_cockpit != null && _cockpit.IsFunctional)
-                    {
-                        fortifyPos = Vector3D.Rotate(_formationPresets[_formation][_id], _cockpit.WorldMatrix);
-                    }
-                    else if (IsValidMatrix(_ctrlMatrix))
-                    {
-                        fortifyPos = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
-                    }
-                    else
-                    {
-                        fortifyPos = _formationPresets[_formation][_id];
-                    }
-
+                    Vector3D fortifyPos = _formationPresets[_formation][_id];
                     if (IsValidVector(fortifyPos) && IsValidVector(_controllerPos))
                     {
                         moveTo = _controllerPos + fortifyPos;
@@ -1500,6 +1417,7 @@ namespace IngameScript
                     break;
             }
 
+            // Final validation before thrust control
             if (IsValidVector(stopPosition) && IsValidVector(moveTo))
             {
                 Vector3D thrustVector = stopPosition - moveTo;
@@ -1509,136 +1427,6 @@ namespace IngameScript
                         _backThrust);
                 }
             }
-        }
-
-        void DrawDebugElements()
-        {
-            if (!_debugDraw) return;
-
-            // Draw drone forward direction (always visible)
-            Vector3D droneForwardEnd = _centerOfGrid + Me.WorldMatrix.Forward * 500;
-            _d.DrawLine(_centerOfGrid, droneForwardEnd, Color.Cyan, 0.2f);
-            _d.DrawGPS("Drone_Forward", droneForwardEnd, Color.Cyan);
-
-            // Draw controller forward direction - prefer cockpit over matrix
-            Vector3D controllerPos = _centerOfGrid;
-            Vector3D controllerForward = Me.WorldMatrix.Forward;
-
-            if (_cockpit != null && _cockpit.IsFunctional)
-            {
-                controllerPos = _cockpit.GetPosition();
-                controllerForward = _cockpit.WorldMatrix.Forward;
-                Vector3D controllerForwardEnd = controllerPos + controllerForward * 500;
-                _d.DrawLine(controllerPos, controllerForwardEnd, Color.Magenta, 0.2f);
-                _d.DrawGPS("Cockpit_Forward", controllerForwardEnd, Color.Magenta);
-                _d.DrawGPS("Controller_Cockpit", controllerPos, Color.Green);
-            }
-
-            // Draw line between controller and drone
-            if (IsValidVector(_controllerPos))
-            {
-                _d.DrawLine(_centerOfGrid, _controllerPos, Color.White, 0.1f);
-            }
-
-            if (!_aiTarget.IsEmpty() && IsValidVector(_aiTarget.Position))
-            {
-                _d.DrawGPS("AI Target", _aiTarget.Position, Color.Red);
-                _d.DrawLine(_centerOfGrid, _aiTarget.Position, Color.Red, 0.1f);
-            }
-
-            if (IsValidVector(_predictedTargetPos) && _predictedTargetPos != Vector3D.Zero)
-            {
-                _d.DrawGPS("Predicted Target", _predictedTargetPos, Color.Orange);
-                _d.DrawLine(_centerOfGrid, _predictedTargetPos, Color.Orange, 0.15f);
-            }
-
-            if (IsValidVector(_controllerPos) && _controllerPos != Vector3D.Zero && _lastControllerPing > 0)
-            {
-                _d.DrawGPS("Controller", _controllerPos, Color.Green);
-                _d.DrawLine(_centerOfGrid, _controllerPos, Color.Green, 0.1f);
-            }
-
-            if (IsValidVector(_resultPos) && _resultPos != Vector3D.Zero)
-            {
-                _d.DrawGPS("Move Target", _resultPos, Color.Blue);
-                _d.DrawLine(_centerOfGrid, _resultPos, Color.Blue, 0.1f);
-            }
-
-            // Formation debug for mode 1
-            if (_mode == 1 && _id >= 0 && _id < _formationPresets[_formation].Length)
-            {
-                Vector3D formationOffset = Vector3D.Zero;
-                if (_cockpit != null && _cockpit.IsFunctional)
-                {
-                    formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _cockpit.WorldMatrix);
-                }
-                else if (IsValidMatrix(_ctrlMatrix))
-                {
-                    formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
-                }
-
-                if (IsValidVector(formationOffset) && IsValidVector(_controllerPos))
-                {
-                    Vector3D formationPos = _controllerPos + formationOffset;
-                    _d.DrawGPS($"Formation_{_id}", formationPos, Color.Yellow);
-                    _d.DrawLine(_centerOfGrid, formationPos, Color.Yellow, 0.08f);
-                }
-            }
-
-            if (_fixedGuns.Count > 0 && !_aiTarget.IsEmpty())
-            {
-                foreach (var weapon in _fixedGuns)
-                {
-                    if (weapon != null && weapon.IsFunctional)
-                    {
-                        try
-                        {
-                            double range = _targeting.GetMaxRange(weapon);
-                            Vector3D weaponEnd = _centerOfGrid + Me.WorldMatrix.Forward * range;
-                            _d.DrawLine(_centerOfGrid, weaponEnd, Color.White, 0.05f);
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
-            }
-
-            if (_closestCollision != Vector3D.Zero && IsValidVector(_closestCollision))
-            {
-                _d.DrawLine(_centerOfGrid, _closestCollision, Color.Orange, 0.2f);
-                _d.DrawGPS("Collision Risk", _closestCollision, Color.Orange);
-            }
-
-            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, _centerOfGrid);
-            if (IsValidVector(stopPosition) && stopPosition != _centerOfGrid)
-            {
-                _d.DrawGPS("Stop Position", stopPosition, Color.Cyan);
-                _d.DrawLine(_centerOfGrid, stopPosition, Color.Cyan, 0.05f);
-            }
-
-            if (IsValidVector(Me.CubeGrid.LinearVelocity) && Me.CubeGrid.LinearVelocity.LengthSquared() > 1)
-            {
-                Vector3D velocityEnd = _centerOfGrid + Me.CubeGrid.LinearVelocity * 10;
-                _d.DrawLine(_centerOfGrid, velocityEnd, Color.Purple, 0.08f);
-            }
-
-            if (_isDeploying)
-            {
-                if (IsValidVector(_deployStartPos))
-                {
-                    _d.DrawGPS("Deploy Start", _deployStartPos, Color.White);
-                }
-
-                Vector3D deployTarget = _deployStartPos + (_deployDirection * _deployDistance);
-                if (IsValidVector(deployTarget))
-                {
-                    _d.DrawGPS("Deploy Target", deployTarget, Color.Lime);
-                    _d.DrawLine(_deployStartPos, deployTarget, Color.Lime, 0.15f);
-                }
-            }
-
-            DrawLeadDebugs();
         }
 
         private bool IsValidVector(Vector3D vector)
@@ -2653,6 +2441,122 @@ namespace IngameScript
             }
 
             OutText += $"DEPLOYING: {distanceFromStart:F1}m / {_deployDistance}m\n";
+        }
+
+        void DrawDebugElements()
+        {
+            if (!_debugDraw) return;
+
+            // Note: _d.RemoveAll() is called at the start of Main() to clear previous frame
+
+            // Always draw current target if we have one
+            if (!_aiTarget.IsEmpty() && IsValidVector(_aiTarget.Position))
+            {
+                _d.DrawGPS("AI Target", _aiTarget.Position, Color.Red);
+                _d.DrawLine(_centerOfGrid, _aiTarget.Position, Color.Red, 0.1f);
+            }
+
+            // Draw predicted target position
+            if (IsValidVector(_predictedTargetPos) && _predictedTargetPos != Vector3D.Zero)
+            {
+                _d.DrawGPS("Predicted Target", _predictedTargetPos, Color.Orange);
+                _d.DrawLine(_centerOfGrid, _predictedTargetPos, Color.Orange, 0.15f);
+            }
+
+            // Draw controller position and connection
+            if (IsValidVector(_controllerPos) && _controllerPos != Vector3D.Zero)
+            {
+                _d.DrawGPS("Controller", _controllerPos, Color.Green);
+                _d.DrawLine(_centerOfGrid, _controllerPos, Color.Green, 0.1f);
+            }
+
+            // Draw movement target
+            if (IsValidVector(_resultPos) && _resultPos != Vector3D.Zero)
+            {
+                _d.DrawGPS("Move Target", _resultPos, Color.Blue);
+                _d.DrawLine(_centerOfGrid, _resultPos, Color.Blue, 0.1f);
+            }
+
+            // Draw formation position when in formation mode
+            if (_mode == 1 && IsValidMatrix(_ctrlMatrix) && _id >= 0 && _id < _formationPresets[_formation].Length)
+            {
+                Vector3D formationOffset = Vector3D.Rotate(_formationPresets[_formation][_id], _ctrlMatrix);
+                if (IsValidVector(formationOffset) && IsValidVector(_controllerPos))
+                {
+                    Vector3D formationPos = _controllerPos + formationOffset;
+                    _d.DrawGPS($"Formation_{_id}", formationPos, Color.Yellow);
+                    _d.DrawLine(_centerOfGrid, formationPos, Color.Yellow, 0.08f);
+                }
+            }
+
+            // Draw weapon ranges and firing directions
+            if (_fixedGuns.Count > 0 && !_aiTarget.IsEmpty())
+            {
+                foreach (var weapon in _fixedGuns)
+                {
+                    if (weapon != null && weapon.IsFunctional)
+                    {
+                        try
+                        {
+                            double range = _targeting.GetMaxRange(weapon);
+                            Vector3D weaponEnd = _centerOfGrid + Me.WorldMatrix.Forward * range;
+                            _d.DrawLine(_centerOfGrid, weaponEnd, Color.White, 0.05f);
+                        }
+                        catch
+                        {
+                            // Ignore weapon range errors
+                        }
+                    }
+                }
+            }
+
+            // Draw collision avoidance
+            if (_closestCollision != Vector3D.Zero && IsValidVector(_closestCollision))
+            {
+                _d.DrawLine(_centerOfGrid, _closestCollision, Color.Orange, 0.2f);
+                _d.DrawGPS("Collision Risk", _closestCollision, Color.Orange);
+            }
+
+            // Draw controller orientation when in formation
+            if (_mode == 1 && IsValidMatrix(_ctrlMatrix) && IsValidVector(_controllerPos))
+            {
+                Vector3D orientationEnd = _controllerPos + _ctrlMatrix.Forward * 200;
+                _d.DrawLine(_controllerPos, orientationEnd, Color.Blue, 0.1f);
+            }
+
+            // Draw stop position
+            Vector3D stopPosition = CalcStopPosition(-Me.CubeGrid.LinearVelocity, _centerOfGrid);
+            if (IsValidVector(stopPosition) && stopPosition != _centerOfGrid)
+            {
+                _d.DrawGPS("Stop Position", stopPosition, Color.Cyan);
+                _d.DrawLine(_centerOfGrid, stopPosition, Color.Cyan, 0.05f);
+            }
+
+            // Draw velocity vector
+            if (IsValidVector(Me.CubeGrid.LinearVelocity) && Me.CubeGrid.LinearVelocity.LengthSquared() > 1)
+            {
+                Vector3D velocityEnd = _centerOfGrid + Me.CubeGrid.LinearVelocity * 10;
+                _d.DrawLine(_centerOfGrid, velocityEnd, Color.Purple, 0.08f);
+            }
+
+            // Draw deploy information when deploying
+            if (_isDeploying)
+            {
+                if (IsValidVector(_deployStartPos))
+                {
+                    _d.DrawGPS("Deploy Start", _deployStartPos, Color.White);
+                }
+
+                Vector3D deployTarget = _deployStartPos + (_deployDirection * _deployDistance);
+                if (IsValidVector(deployTarget))
+                {
+                    _d.DrawGPS("Deploy Target", deployTarget, Color.Lime);
+                    _d.DrawLine(_deployStartPos, deployTarget, Color.Lime, 0.15f);
+                }
+            }
+
+            // Always draw ammo lead positions (moved from conditional drawing)
+            DrawLeadDebugs();
         }
     }
 }
