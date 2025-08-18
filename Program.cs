@@ -12,10 +12,8 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
         #region mdk preserve
-
-        // Originally made by Aristeas for StarCore, modified by Invalid.
-        // https://github.com/StarCoreSE/Rocketman-Drone-Manager-Invalid
-
+        //TODO: drones that undock or are repasted require a recompile to be reliable, like they go half speed when
+        //trying to keep up or something strange. remove the rotate thingy we just need reliable poses. 
         /* CONFIG */
 
         /* GENERAL SETTINGS */
@@ -56,7 +54,7 @@ namespace IngameScript
         /* PERFORMANCE SETTINGS */
 
         // Runtime threshold in milliseconds - operations throttle above this (PER DRONE)
-        double _runtimeThreshold = 0.05;
+        double _runtimeThreshold = 0.1;
 
         // Exponential moving average significance for runtime tracking
         const double RuntimeSignificance = 0.005;
