@@ -48,8 +48,8 @@ namespace IngameScript
         // WARNING: _debugDraw causes EXTREME performance impact on MS PB!
         // Only enable in offline singleplayer with Debug Draw API available.
         // Use at your own risk - will cause severe runtime spikes!
-        bool _debugDraw = true;
-        
+        bool _debugDraw = false;
+
         /* PERFORMANCE SETTINGS */
 
         // Runtime threshold in milliseconds - operations throttle above this (PER DRONE)
@@ -895,7 +895,7 @@ namespace IngameScript
                     _errorCounter++;
                 }
             }
-            
+
             DrawDebugElements();
             PrintDebugText();
 
@@ -1171,7 +1171,11 @@ namespace IngameScript
 
         void RunActiveDrone()
         {
-            OutText += "Locked onto " + _aiTarget.Name + "\n";
+            // Early validation to avoid expensive operations on invalid targets
+            bool hasValidTarget = !_aiTarget.IsEmpty() && IsValidVector(_aiTarget.Position) && _aiTarget.EntityId != 0;
+
+            OutText += hasValidTarget ? $"Locked onto {_aiTarget.Name}\n" : "No valid target\n";
+
             if (_frame % 2 == 0) ActiveDroneFrame2();
 
             // Calculate throttle state once for the entire method
@@ -1181,7 +1185,8 @@ namespace IngameScript
             Vector3D aimDirection = Me.WorldMatrix.Forward;
             bool hasValidAimPoint = false;
 
-            if (!_aiTarget.IsEmpty())
+            // Only do expensive targeting operations if we have a valid target
+            if (hasValidTarget)
             {
                 if (_targeting is WCTargetingHelper && _fixedGuns.Count > 0)
                 {
@@ -1206,7 +1211,7 @@ namespace IngameScript
                     }
 
                     int ammoUpdateInterval = isThrottled ? 60 : 30;
-                    if (_frame % ammoUpdateInterval == 0)
+                    if (_frame % ammoUpdateInterval == 0 && _weaponMap.Count > 0)
                     {
                         _cachedPrimaryAmmo =
                             wcTargeting.wAPI.GetActiveAmmo(_fixedGuns.First(), _weaponMap.First().Value);
@@ -1219,7 +1224,8 @@ namespace IngameScript
                     }
                 }
 
-                if (!hasValidAimPoint && IsValidVector(_aiTarget.Position))
+                // Fallback to direct target position if WeaponCore prediction failed
+                if (!hasValidAimPoint)
                 {
                     aimPoint = _aiTarget.Position;
                     hasValidAimPoint = true;
@@ -1244,6 +1250,7 @@ namespace IngameScript
             }
             else
             {
+                // No valid target - use controller orientation if available
                 if (IsValidMatrix(_ctrlMatrix))
                 {
                     aimDirection = _ctrlMatrix.Forward;
@@ -1270,7 +1277,7 @@ namespace IngameScript
                         _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     }
 
-                    if (!_aiTarget.IsEmpty() && IsValidVector(_aiTarget.Position))
+                    if (hasValidTarget)
                     {
                         Vector3D formationOffset =
                             Vector3D.Rotate(_formationPresets[1][_id] / _formDistance * _mainDistance, _ctrlMatrix);
@@ -1338,7 +1345,7 @@ namespace IngameScript
                             formationAimDirection = Me.WorldMatrix.Forward;
                         }
                     }
-                    else if (!_aiTarget.IsEmpty() && IsValidVector(aimDirection))
+                    else if (hasValidTarget && IsValidVector(aimDirection))
                     {
                         formationAimDirection = aimDirection;
                     }
@@ -1356,7 +1363,7 @@ namespace IngameScript
                         formationAimDirection = Me.WorldMatrix.Forward;
                     }
 
-                    if (!_aiTarget.IsEmpty() && !_healMode && IsValidVector(aimDirection))
+                    if (hasValidTarget && !_healMode && IsValidVector(aimDirection))
                     {
                         _gyros.FaceVectors(aimDirection, Me.WorldMatrix.Up);
                     }
@@ -1448,8 +1455,9 @@ namespace IngameScript
 
         private void PrintDebugText()
         {
-            OutText += $"{Runtime.CurrentInstructionCount} instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
-            OutText += $"Avg Runtime: {_averageRuntimeMs:F2}ms\n";
+            int startInstructions = Runtime.CurrentInstructionCount;
+            OutText += $"Debug overhead: {Runtime.CurrentInstructionCount - startInstructions} instructions\n";
+            OutText += $"{Runtime.CurrentInstructionCount} total instructions @ {Runtime.LastRunTimeMs:F2}ms\n";
 
             if (_isController)
             {
@@ -1630,7 +1638,7 @@ namespace IngameScript
             if ((_mode == 1) && _frame % 2 == 0)
             {
                 MatrixD m = _cockpit.IsFunctional ? _cockpit.WorldMatrix : Me.WorldMatrix;
-                
+
                 if (_rotate)
                     m *= Matrix.CreateFromAxisAngle(m.Forward, _orbitsPerSecond % 360 / _frame / 57.2957795f);
 
