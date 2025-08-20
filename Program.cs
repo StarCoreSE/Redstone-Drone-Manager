@@ -34,7 +34,7 @@ namespace IngameScript
         bool _autoTarget;
 
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [true]
-        bool _rotate = true;
+        bool _rotate = false;
 
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float _orbitsPerSecond = 6;
