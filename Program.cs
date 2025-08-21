@@ -377,6 +377,7 @@ namespace IngameScript
         Vector3D _deployDirection;
         double _deployDistance = 100;
         IMyShipConnector _connector;
+        List<IMyBatteryBlock> _batteries = new List<IMyBatteryBlock>();
 
         #endregion
 
@@ -620,6 +621,13 @@ namespace IngameScript
             GridTerminalSystem.GetBlocksOfType(allConnectors, c => c.CubeGrid.EntityId == droneGridId);
             _connector = allConnectors.FirstOrDefault();
             Echo($"Found {allConnectors.Count} connectors for deploy functionality");
+
+            // Get all batteries for connector-aware power management
+            GridTerminalSystem.GetBlocksOfType(_batteries, b => b.CubeGrid.EntityId == droneGridId);
+            Echo($"Found {_batteries.Count} batteries for connector-aware management");
+
+            // Initialize battery management based on connector status
+            InitializeBatteryManagement();
 
             // Get all thrust
             GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == GridId);
@@ -948,6 +956,9 @@ namespace IngameScript
 
             // Reset grid tracking
             GridId = Me.CubeGrid.EntityId;
+
+            // Reinitialize battery management
+            InitializeBatteryManagement();
 
             // Reinitialize communication listeners
             _myBroadcastListener = IGC.RegisterBroadcastListener(_isController ? "-1" : _group.ToString());
@@ -2351,6 +2362,48 @@ namespace IngameScript
             return _runIndicator;
         }
 
+        void InitializeBatteryManagement()
+        {
+            if (_batteries.Count == 0) return;
+
+            // Check if any connector is currently connected
+            bool isConnected = false;
+            List<IMyShipConnector> allConnectors = new List<IMyShipConnector>();
+            GridTerminalSystem.GetBlocksOfType(allConnectors, c => c.CubeGrid.EntityId == GridId);
+            
+            foreach (var connector in allConnectors)
+            {
+                if (connector.Status == MyShipConnectorStatus.Connected)
+                {
+                    isConnected = true;
+                    break;
+                }
+            }
+
+            // Set battery charge mode based on connector status
+            if (isConnected)
+            {
+                SetBatteryChargeMode(ChargeMode.Recharge);
+                Echo($"Connected to dock - set {_batteries.Count} batteries to RECHARGE mode");
+            }
+            else
+            {
+                SetBatteryChargeMode(ChargeMode.Auto);
+                Echo($"Not connected to dock - set {_batteries.Count} batteries to AUTO mode");
+            }
+        }
+
+        void SetBatteryChargeMode(ChargeMode mode)
+        {
+            foreach (var battery in _batteries)
+            {
+                if (battery.IsFunctional)
+                {
+                    battery.ChargeMode = mode;
+                }
+            }
+        }
+
         void StartDeploy()
         {
             // Find connector on this grid
@@ -2370,6 +2423,10 @@ namespace IngameScript
 
             // Calculate deploy direction (opposite of connector's forward direction)
             _deployDirection = -_connector.WorldMatrix.Forward;
+
+            // Set batteries to auto mode before disconnecting
+            SetBatteryChargeMode(ChargeMode.Auto);
+            Echo($"Set {_batteries.Count} batteries to AUTO mode for deploy");
 
             // Disconnect from connector
             _connector.Disconnect();
