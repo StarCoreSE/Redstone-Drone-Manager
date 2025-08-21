@@ -36,6 +36,12 @@ namespace IngameScript
         // If true, rotate around controller grid. If false, remain fixed. Only applies to controller. Default [true]
         bool _rotate = false;
 
+        // If true, automatically manage battery charge modes based on connector status. Default [true]
+        bool _autoBatteryManagement = true;
+
+        // Antenna radius in meters. Default [25000] (25km)
+        float _antennaRadius = 20000;
+
         // Speed of rotation around parent grid. Higher = slower. Default [6]
         float _orbitsPerSecond = 6;
 
@@ -536,19 +542,19 @@ namespace IngameScript
             });
             Echo("Set grid mass to " + _mass);
 
-            // Set antenna ranges to 25k (save a tiny bit of power)
+            // Set antenna ranges (save a tiny bit of power)
             GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(null, b =>
             {
                 if (b.CubeGrid.EntityId == droneGridId)
                 {
-                    b.Radius = 25000;
+                    b.Radius = _antennaRadius;
                     _antenna = b;
                     return true;
                 }
 
                 return false;
             });
-            Echo("Set antenna radii to 25km");
+            Echo($"Set antenna radii to {_antennaRadius / 1000}km");
 
             // Get LCDs with name containing 'Rocketman' and sets them up
             if (_isController)
@@ -2364,7 +2370,7 @@ namespace IngameScript
 
         void InitializeBatteryManagement()
         {
-            if (_batteries.Count == 0) return;
+            if (!_autoBatteryManagement || _batteries.Count == 0) return;
 
             // Check if any connector is currently connected
             bool isConnected = false;
