@@ -4,7 +4,7 @@ by @Aristeas#1034
 Commissioned by @First-Pass#8270
 
 Originally made by Aristeas for StarCore, modified by Invalid.
-https://github.com/StarCoreSE/Rocketman-Drone-Manager-Invalid
+https://github.com/StarCoreSE/Redstone-Drone-Manager
 
 -----------------------------------
 
@@ -26,6 +26,7 @@ Construction guide:
       - Range, name, and hudtext is not important. Just have an antenna on the grid.
       - Make sure to protect it! This is the second most important block, other than the programmable block.
       - If the antenna is lost the drones will act on their own and try to kill their nearest target.
+      - The script automatically sets your antenna to 20k (configurable)
 
    4. Have a controller ship
       - Set the 'isController' bool in the configs to true on the controller (or set this PB's customdata to "-1")

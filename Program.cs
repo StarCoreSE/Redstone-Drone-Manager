@@ -93,7 +93,7 @@ namespace IngameScript
         // Minimum age in seconds of oldest missile before autoflare triggers.
         int _minMissileAge = 2;
 
-        // Radius of the harm zone. this is in meters, not km.
+        // Radius of the harm zone. this is in meters, not km. (unused)
         int _zoneRadius = 12000;
 
 
