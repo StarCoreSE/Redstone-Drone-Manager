@@ -13,7 +13,7 @@ namespace IngameScript
     {
         #region mdk preserve
         //TODO: drones that undock or are repasted require a recompile to be reliable, like they go half speed when
-        //trying to keep up or something strange. remove the rotate thingy we just need reliable poses. 
+        //trying to keep up or something strange. 
         /* CONFIG */
 
         /* GENERAL SETTINGS */
@@ -135,21 +135,8 @@ namespace IngameScript
         // DON'T EDIT BELOW THIS LINE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING //
 
         #endregion
-
-        // In Development Version //
-
+        
         int _mode = 1;
-        /*
-         * 0 - Main
-         *     Shoot and Scoot
-         *     Swarm and Shoot
-         *
-         * 1 - Wingman
-         *     Orbit controller & fire at enemies
-         *
-         * 2 - Fortify Fire
-         *     GOTO controller and stay. Enter fortify and fire at enemies
-         */
 
         char _runIndicator = '|';
 
@@ -721,7 +708,7 @@ namespace IngameScript
                                 (1 - RuntimeSignificance) * _averageRuntimeMs;
 
             if (!string.IsNullOrEmpty(argument) &&
-                (argument == "recover" || argument == "recycle" || argument == "reset"))
+                (argument.ToLower() == "recover" || argument.ToLower() == "recycle" || argument.ToLower() == "reset"))
             {
                 if (_isController)
                 {

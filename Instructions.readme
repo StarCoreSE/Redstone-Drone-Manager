@@ -25,6 +25,7 @@ Construction guide:
    3. Have an antenna
       - Range, name, and hudtext is not important. Just have an antenna on the grid.
       - Make sure to protect it! This is the second most important block, other than the programmable block.
+      - If the antenna is lost the drones will act on their own and try to kill their nearest target.
 
    4. Have a controller ship
       - Set the 'isController' bool in the configs to true on the controller (or set this PB's customdata to "-1")
@@ -36,11 +37,13 @@ Construction guide:
 
 
 
-Arguments:
-	MAIN       - Swarm mode. Flys on its own and targets enemies.
+Arguments (should work in uppercase or lowercase):
+	MAIN       - Swarm mode. Flies to your locked target.
 	WING       - Wingman mode. Follows your ship in a specified formation. [DEFAULT]
        HEAL    - Heal mode. Switches to healing ammo if set, and enables wingman mode.
 	FORT       - Fortify mode. Moves to your current location and remains there.
+	RESET - Reinitializes the entire swarm. 
+	DEPLOY - if connectored to a ship during initialization (recompile or RESET), the drone disconnects, sets any batteries to AUTO, moves 100 meters away, then waits for a START command
 	
 	START      - Starts all drone groups
 	STOP       - Stops all drone groups
