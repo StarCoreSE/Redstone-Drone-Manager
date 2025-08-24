@@ -633,15 +633,31 @@ namespace IngameScript
             Echo($"Found {allConnectors.Count} connectors for deploy functionality");
 
             // Get all batteries for connector-aware power management
-            GridTerminalSystem.GetBlocksOfType(_batteries, b => b.CubeGrid.EntityId == droneGridId);
-            Echo($"Found {_batteries.Count} batteries for connector-aware management");
+            // Skip battery management for controller
+            if (!_isController)
+            {
+                GridTerminalSystem.GetBlocksOfType(_batteries, b => b.CubeGrid.EntityId == droneGridId);
+                Echo($"Found {_batteries.Count} batteries for connector-aware management");
+            }
+            else
+            {
+                Echo("Controller detected - skipping battery management setup");
+            }
 
             // Get all thrusters, gyros and shield controllers for connector-aware docking management
-            GridTerminalSystem.GetBlocksOfType(_dockedThrusters, t => t.CubeGrid.EntityId == droneGridId);
-            GridTerminalSystem.GetBlocksOfType(_dockedGyros, g => g.CubeGrid.EntityId == droneGridId);
-            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(_dockedShieldControllers, 
-                s => s.CubeGrid.EntityId == droneGridId && s.CustomName.Contains("Shield Controller"));
-            Echo($"Found {_dockedThrusters.Count} thrusters, {_dockedGyros.Count} gyros, and {_dockedShieldControllers.Count} shield controllers for docking management");
+            // Skip docking management for controller
+            if (!_isController)
+            {
+                GridTerminalSystem.GetBlocksOfType(_dockedThrusters, t => t.CubeGrid.EntityId == droneGridId);
+                GridTerminalSystem.GetBlocksOfType(_dockedGyros, g => g.CubeGrid.EntityId == droneGridId);
+                GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(_dockedShieldControllers, 
+                    s => s.CubeGrid.EntityId == droneGridId && s.CustomName.Contains("Shield Controller"));
+                Echo($"Found {_dockedThrusters.Count} thrusters, {_dockedGyros.Count} gyros, and {_dockedShieldControllers.Count} shield controllers for docking management");
+            }
+            else
+            {
+                Echo("Controller detected - skipping docking management setup");
+            }
 
             // Initialize battery, thruster and gyro management based on connector status
             InitializeDockingManagement();
