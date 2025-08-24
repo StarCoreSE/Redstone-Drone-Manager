@@ -1,4 +1,4 @@
-﻿RocketMan Drone Manager
+﻿Redstone Drone Manager
 
 by @Aristeas#1034
 Commissioned by @First-Pass#8270
@@ -29,7 +29,7 @@ Construction guide:
       - The script automatically sets your antenna to 20k (configurable)
 
    4. Have a controller ship
-      - Set the 'isController' bool in the configs to true on the controller (or set this PB's customdata to "-1")
+      - Set the 'isController' bool in the PB customdata. -1 is controller, 1 is drone.
       - Make sure it has an antenna too!
 
    5. Shoot people (optional)

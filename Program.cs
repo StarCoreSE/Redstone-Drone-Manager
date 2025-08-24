@@ -19,6 +19,7 @@ namespace IngameScript
         /* GENERAL SETTINGS */
 
         // If this PB is on a drone, set to 'false'. If this PB is on a ship, set to 'true'.
+        // SET THIS IN THE CUSTOMDATA! -1 is the controller, 1 is a drone.
         bool _isController;
 
         // Set this to true if multiple controllers are in use
@@ -38,6 +39,15 @@ namespace IngameScript
 
         // If true, automatically manage battery charge modes based on connector status. Default [true]
         bool _autoBatteryManagement = true;
+        
+        // If true, automatically disable thrusters when docked to prevent interference. Default [true]
+        bool _autoThrusterManagement = true;
+        
+        // If true, automatically disable gyros when docked to prevent interference. Default [true]
+        bool _autoGyroManagement = true;
+        
+        // If true, automatically lower shields when docked and raise them when deploying. Default [true]
+        bool _autoShieldManagement = true;
 
         // Antenna radius in meters. Default [25000] (25km)
         float _antennaRadius = 20000;
@@ -284,6 +294,8 @@ namespace IngameScript
         bool _isIntegrity;
         ITerminalAction _toggleFort;
         ITerminalAction _toggleIntegrity;
+        ITerminalAction _shieldUp;
+        ITerminalAction _shieldDown;
         Vector3D _predictedTargetPos; // target position + lead
         Vector3D _controllerPos; // center of controller ship
 
@@ -371,6 +383,9 @@ namespace IngameScript
         double _deployDistance = 100;
         IMyShipConnector _connector;
         List<IMyBatteryBlock> _batteries = new List<IMyBatteryBlock>();
+        List<IMyThrust> _dockedThrusters = new List<IMyThrust>();
+        List<IMyGyro> _dockedGyros = new List<IMyGyro>();
+        List<IMyTerminalBlock> _dockedShieldControllers = new List<IMyTerminalBlock>();
 
         #endregion
 
@@ -490,6 +505,8 @@ namespace IngameScript
                 _shieldController.GetActions(new List<ITerminalAction>(), b =>
                 {
                     if (b.Id == "DS-C_ShieldFortify_Toggle") _toggleFort = b;
+                    if (b.Id == "DS-C_ToggleShield_On") _shieldUp = b;
+                    if (b.Id == "DS-C_ToggleShield_Off") _shieldDown = b;
                     return true;
                 });
                 Echo("Found ShieldFortify action");
@@ -619,8 +636,15 @@ namespace IngameScript
             GridTerminalSystem.GetBlocksOfType(_batteries, b => b.CubeGrid.EntityId == droneGridId);
             Echo($"Found {_batteries.Count} batteries for connector-aware management");
 
-            // Initialize battery management based on connector status
-            InitializeBatteryManagement();
+            // Get all thrusters, gyros and shield controllers for connector-aware docking management
+            GridTerminalSystem.GetBlocksOfType(_dockedThrusters, t => t.CubeGrid.EntityId == droneGridId);
+            GridTerminalSystem.GetBlocksOfType(_dockedGyros, g => g.CubeGrid.EntityId == droneGridId);
+            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(_dockedShieldControllers, 
+                s => s.CubeGrid.EntityId == droneGridId && s.CustomName.Contains("Shield Controller"));
+            Echo($"Found {_dockedThrusters.Count} thrusters, {_dockedGyros.Count} gyros, and {_dockedShieldControllers.Count} shield controllers for docking management");
+
+            // Initialize battery, thruster and gyro management based on connector status
+            InitializeDockingManagement();
 
             // Get all thrust
             GridTerminalSystem.GetBlocksOfType(_allThrust, t => t.CubeGrid.EntityId == GridId);
@@ -950,8 +974,8 @@ namespace IngameScript
             // Reset grid tracking
             GridId = Me.CubeGrid.EntityId;
 
-            // Reinitialize battery management
-            InitializeBatteryManagement();
+            // Reinitialize docking management
+            InitializeDockingManagement();
 
             // Reinitialize communication listeners
             _myBroadcastListener = IGC.RegisterBroadcastListener(_isController ? "-1" : _group.ToString());
@@ -2355,9 +2379,9 @@ namespace IngameScript
             return _runIndicator;
         }
 
-        void InitializeBatteryManagement()
+        void InitializeDockingManagement()
         {
-            if (!_autoBatteryManagement || _batteries.Count == 0) return;
+            if (!_autoBatteryManagement && !_autoThrusterManagement && !_autoGyroManagement && !_autoShieldManagement) return;
 
             // Check if any connector is currently connected
             bool isConnected = false;
@@ -2376,13 +2400,49 @@ namespace IngameScript
             // Set battery charge mode based on connector status
             if (isConnected)
             {
-                SetBatteryChargeMode(ChargeMode.Recharge);
-                Echo($"Connected to dock - set {_batteries.Count} batteries to RECHARGE mode");
+                if (_autoBatteryManagement && _batteries.Count > 0)
+                {
+                    SetBatteryChargeMode(ChargeMode.Recharge);
+                    Echo($"Connected to dock - set {_batteries.Count} batteries to RECHARGE mode");
+                }
+                if (_autoThrusterManagement)
+                {
+                    SetThrusterEnabled(false);
+                    Echo($"Connected to dock - disabled {_dockedThrusters.Count} thrusters");
+                }
+                if (_autoGyroManagement)
+                {
+                    SetGyroEnabled(false);
+                    Echo($"Connected to dock - disabled {_dockedGyros.Count} gyros");
+                }
+                if (_autoShieldManagement)
+                {
+                    SetShieldStatus(false);
+                    Echo($"Connected to dock - lowered {_dockedShieldControllers.Count} shields");
+                }
             }
             else
             {
-                SetBatteryChargeMode(ChargeMode.Auto);
-                Echo($"Not connected to dock - set {_batteries.Count} batteries to AUTO mode");
+                if (_autoBatteryManagement && _batteries.Count > 0)
+                {
+                    SetBatteryChargeMode(ChargeMode.Auto);
+                    Echo($"Not connected to dock - set {_batteries.Count} batteries to AUTO mode");
+                }
+                if (_autoThrusterManagement)
+                {
+                    SetThrusterEnabled(true);
+                    Echo($"Not connected to dock - enabled {_dockedThrusters.Count} thrusters");
+                }
+                if (_autoGyroManagement)
+                {
+                    SetGyroEnabled(true);
+                    Echo($"Not connected to dock - enabled {_dockedGyros.Count} gyros");
+                }
+                if (_autoShieldManagement)
+                {
+                    SetShieldStatus(true);
+                    Echo($"Not connected to dock - raised {_dockedShieldControllers.Count} shields");
+                }
             }
         }
 
@@ -2393,6 +2453,46 @@ namespace IngameScript
                 if (battery.IsFunctional)
                 {
                     battery.ChargeMode = mode;
+                }
+            }
+        }
+
+        void SetThrusterEnabled(bool enabled)
+        {
+            foreach (var thruster in _dockedThrusters)
+            {
+                if (thruster.IsFunctional)
+                {
+                    thruster.Enabled = enabled;
+                }
+            }
+        }
+
+        void SetGyroEnabled(bool enabled)
+        {
+            foreach (var gyro in _dockedGyros)
+            {
+                if (gyro.IsFunctional)
+                {
+                    gyro.Enabled = enabled;
+                }
+            }
+        }
+
+        void SetShieldStatus(bool up)
+        {
+            foreach (var shieldController in _dockedShieldControllers)
+            {
+                if (shieldController.IsFunctional)
+                {
+                    if (up && _shieldUp != null)
+                    {
+                        _shieldUp.Apply(shieldController);
+                    }
+                    else if (!up && _shieldDown != null)
+                    {
+                        _shieldDown.Apply(shieldController);
+                    }
                 }
             }
         }
@@ -2417,9 +2517,27 @@ namespace IngameScript
             // Calculate deploy direction (opposite of connector's forward direction)
             _deployDirection = -_connector.WorldMatrix.Forward;
 
-            // Set batteries to auto mode before disconnecting
-            SetBatteryChargeMode(ChargeMode.Auto);
-            Echo($"Set {_batteries.Count} batteries to AUTO mode for deploy");
+            // Set batteries to auto mode and enable thrusters/gyros before disconnecting
+            if (_autoBatteryManagement)
+            {
+                SetBatteryChargeMode(ChargeMode.Auto);
+                Echo($"Set {_batteries.Count} batteries to AUTO mode for deploy");
+            }
+            if (_autoThrusterManagement)
+            {
+                SetThrusterEnabled(true);
+                Echo($"Enabled {_dockedThrusters.Count} thrusters for deploy");
+            }
+            if (_autoGyroManagement)
+            {
+                SetGyroEnabled(true);
+                Echo($"Enabled {_dockedGyros.Count} gyros for deploy");
+            }
+            if (_autoShieldManagement)
+            {
+                SetShieldStatus(true);
+                Echo($"Raised {_dockedShieldControllers.Count} shields for deploy");
+            }
 
             // Disconnect from connector
             _connector.Disconnect();
